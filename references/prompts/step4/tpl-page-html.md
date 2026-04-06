@@ -41,7 +41,7 @@
    ```bash
    python3 {{SKILL_DIR}}/scripts/resource_loader.py resolve --refs-dir {{REFS_DIR}} --planning {{PLANNING_OUTPUT}}
    ```
-   resolve 输出的组件正文是你的材料库和起点。你是设计师而非渲染引擎 -- 在保证 1280x720 画布红线的前提下，根据 `page_goal` 和 `director_command` 自主决定最佳的视觉表达方式。后续有像素级图审兜底。
+   resolve 输出的组件正文是必须严格遵从的起点。你是最严格的设计执行官 -- 在保证 1280x720 画布物理红线的前提下，结合 `page_goal` 和 `director_command`，运用高精度的代码将策划稿在 DOM 树中毫无妥协地还原。图审只会挑出你的瑕疵，不会容忍你重构骨架。
 4. 核对图片素材，确认 `image.source_hint` 路径可访问：
    ```bash
    python3 {{SKILL_DIR}}/scripts/resource_loader.py images --images-dir {{IMAGES_DIR}}
@@ -59,11 +59,10 @@
    - `generate` / `provided`（`image.needed=true`）：将 `source_hint` 路径绑定到 `<img src>` 或 `background-image`，图片必须实际渲染
    - `manual_slot`（`image.needed=false`）：渲染明确可替换的图片占位区（带边框/提示文字），不得偷偷删除占位区
    - `decorate`（`image.needed=false`）：不使用外部图片，用内联 SVG、色块、渐变、字体装饰补足视觉氛围，不得留空白大洞
-8. **设计独立性自检（写 HTML 前必须在心中回答）**：
-   - 本页的布局是为本页的 `page_goal` 和 `director_command` 量身定做的吗？
-   - 视觉锚点的位置和大小是否反映了本页内容的主次关系？
-   - 如果换一个完全不同的主题，这个布局还能直接套用吗？（如果能，说明你在套模板而非做设计）
-   - CSS 实现拥有最高自由权，大胆使用绝对定位、高级滤镜、clip-path 等技巧。像素级图审会帮你兜底。
+8. **设计《阴阳割线》自检（写 HTML 前必须在心中回答并执行）**：
+   - **阴极（不可抗拒的物理法则）**：本页底层承重墙符合 `page_goal` 和 `director_command` 所强制要求的结构吗？是否私自修改了顶部标题栏绝对锚点或改变了 Grid 流？（如是，则推翻重写！）
+   - **阳极（极端爆裂的视觉特权）**：你的画面层次够深邃吗？是否在不触碰承重墙的前提下，使用了令人震颤的超大暗纹水印、负边距交叠对撞、以及字号达到 5 倍以上差距的极致排印技术，消除了死板的公文盒子感？
+   - 证明你不仅是严谨的码农，更是狂热的前卫排印大师！
 9. **每个 planning card 都必须在 HTML 中有对应渲染根节点**，并为根节点补上 `data-card-id="<planning.card_id>"` 便于 review 对账；如果某卡含 `chart.chart_type`，渲染结果必须与该类型匹配。
 10. 将完整 HTML 写入 `{{SLIDE_OUTPUT}}`
 11. 完成信号：输出 `--- STAGE 2 COMPLETE: {{SLIDE_OUTPUT}} ---`，然后按外层 orchestrator 协议继续下一阶段

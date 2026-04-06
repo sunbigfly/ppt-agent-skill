@@ -31,7 +31,11 @@
 
 **Stateless checkpoint recovery**: No progress state files. After any interruption, the system infers its exact resume point by scanning committed artifact files (`outline.txt`, `style.json`, `slide-N.png`, etc.) on disk.
 
-**Data-render boundary isolation**: Every slide produces a structured JSON contract, validated by `planning_validator.py` before entering the HTML render step. Structural errors are intercepted before they can corrupt output.
+**Data-render boundary isolation**: Every slide produces a structured JSON contract, validated by `planning_validator.py` before entering the HTML render step. Generated static files are strictly guarded by `html` physical structure detectors to block non-standard skeletons.
+
+**Yin-Yang Demarcation Philosophy**: A pioneering approach that enforces absolute physical firewalls and baseline grid alignment (the Yin), while granting AI models total supremacy over typography, overlap depth, and negative spaces (the Yang)—crushing the mediocre "Word document" look.
+
+**Zero-delay rasterization engine**: The built-in Puppeteer engine fully eliminates hardcoded timeouts, hooking directly into event-driven signals (`document.fonts.ready` and global node listeners). This achieves lightning-fast snapshotting and native SVG parsing with zero dropped fonts or wasted waiting periods.
 
 **Dual-engine PPTX export**: A PNG rasterization pipeline guarantees cross-platform visual fidelity; an SVG vector pipeline preserves text editability for post-delivery modifications.
 

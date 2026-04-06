@@ -43,8 +43,15 @@ const path = require('path');
             waitUntil: 'networkidle0',
             timeout: 30000
         });
-        // 等待渲染稳定（动画首帧等）
-        await new Promise(r => setTimeout(r, 500));
+        // 智能等候字体与所有贴图实体装载完成再捕获
+        await page.evaluate(async () => {
+            await document.fonts.ready;
+            const images = Array.from(document.querySelectorAll('img'));
+            await Promise.all(images.map(img => {
+                if (img.complete) return Promise.resolve();
+                return new Promise(r => { img.onload = r; img.onerror = r; });
+            }));
+        });
 
         await page.screenshot({
             path: item.png,
@@ -62,8 +69,20 @@ const path = require('path');
 """
 
 
+def get_dep_dir(work_dir: Path) -> Path:
+    curr = work_dir.resolve()
+    for _ in range(5):
+        if curr.name == "ppt-output":
+            return curr
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+    return work_dir
+
+
 def ensure_puppeteer(work_dir: Path) -> bool:
     """确保 Puppeteer 已安装，返回是否可用。"""
+    dep_dir = get_dep_dir(work_dir)
     try:
         r = subprocess.run(
             ["node", "-e", "require('puppeteer')"],
@@ -74,11 +93,11 @@ def ensure_puppeteer(work_dir: Path) -> bool:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    print("Installing puppeteer...")
+    print(f"Installing puppeteer in {dep_dir}...")
     try:
         r = subprocess.run(
             ["npm", "install", "puppeteer"],
-            capture_output=True, text=True, timeout=180, cwd=str(work_dir)
+            capture_output=True, text=True, timeout=180, cwd=str(dep_dir)
         )
         return r.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):

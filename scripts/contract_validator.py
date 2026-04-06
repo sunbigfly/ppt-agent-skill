@@ -543,6 +543,33 @@ def validate_images(path: Path, require_paths: bool) -> tuple[ValidationResult, 
     return result, summary
 
 
+def validate_html(path: Path, page_type: str) -> tuple[ValidationResult, dict[str, Any]]:
+    result = ValidationResult()
+    text = read_text(path)
+    if not text:
+        result.error("html: file is empty")
+        return result, {"errors": 1, "warnings": 0}
+
+    # Only enforce header/footer for 'content', 'toc', 'section' page types.
+    if page_type in ("content", "toc", "section"):
+        has_header = bool(re.search(r'<header[^>]*class=([\'"])[^\'"]*\bslide-header\b[^\'"]*\1[^>]*>', text, re.IGNORECASE))
+        if not has_header:
+            result.error(f"html: page type '{page_type}' must contain a <header class=\"slide-header\"> DOM element")
+        
+        has_footer = bool(re.search(r'<footer[^>]*class=([\'"])[^\'"]*\bslide-footer\b[^\'"]*\1[^>]*>', text, re.IGNORECASE))
+        if not has_footer:
+            result.error(f"html: page type '{page_type}' must contain a <footer class=\"slide-footer\"> DOM element")
+    elif page_type not in ("cover", "end"):
+        result.warn(f"html: unrecognized page_type '{page_type}'")
+
+    summary = {
+        "page_type": page_type,
+        "errors": len(result.errors),
+        "warnings": len(result.warnings),
+    }
+    return result, summary
+
+
 def print_messages(result: ValidationResult) -> None:
     for item in result.errors:
         print(f"ERROR: {item}")
@@ -603,6 +630,12 @@ def main() -> int:
     manifest.add_argument("--strict", action="store_true", help="Treat warnings as failures")
     manifest.add_argument("--report", help="Optional JSON report path")
 
+    html_parser = subparsers.add_parser("html", help="Validate page html structure")
+    html_parser.add_argument("path", help="Path to html file")
+    html_parser.add_argument("--page-type", required=True, help="Type of the page (cover, content, toc, etc.)")
+    html_parser.add_argument("--strict", action="store_true", help="Treat warnings as failures")
+    html_parser.add_argument("--report", help="Optional JSON report path")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -632,6 +665,8 @@ def main() -> int:
             result, payload = validate_images(target, bool(args.require_paths))
         elif args.command == "page-review":
             result, payload = validate_page_review(target, bool(args.require_pass))
+        elif args.command == "html":
+            result, payload = validate_html(target, getattr(args, "page_type", ""))
         else:
             base_dir = Path(args.base_dir).resolve() if args.base_dir else target.parent.resolve()
             result, payload = validate_delivery_manifest(target, base_dir)

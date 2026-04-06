@@ -4,7 +4,7 @@
 > 本 prompt 已包含了你在此阶段所需的**全部**任务目标与 Playbook 细则。
 > **严格禁止调用工具去读取外层的 `SKILL.md` 或主控全局规则文件！**
 >
-> 本阶段的唯一目标：产出 `{{PLANNING_OUTPUT}}`。字段名和枚举值以 validator 合同为准，**但在具体排版布局策略与内容表现形式上，你拥有极大的设计和创新自由度！** 后续配备了非常严格完善的像素级图审环节，因此**不要害怕打破沉闷陈规，请尽情发挥你的策划创意**。
+> 本阶段的唯一目标：产出 `{{PLANNING_OUTPUT}}`。作为架构师，你需要在这里定下不可逾越的**硬性工程图纸**。请在 `layout_hint`、`focus_zone` 和 `must_avoid` 等字段中施加严密的结构控制。后续的 HTML 阶段和图审环节，都将绝对服从你在此刻定下的框架纪律。
 > 若外层 orchestrator 已提供阶段推进协议，则外层协议优先于本 prompt 中的完成信号描述。
 
 这是你为第 {{PAGE_NUM}} 页执行的**第一阶段核心任务**：策划定骨稿。
@@ -60,7 +60,7 @@
    ```bash
    python3 {{SKILL_DIR}}/scripts/resource_loader.py menu --refs-dir {{REFS_DIR}}
    ```
-7. **回答以下设计提问来驱动你的资源选择决策**（不要查表套用，你是设计师不是填表员），然后决定 `page_type`、`layout_hint`、`cards[].card_type`、`chart.chart_type`、`resource_ref`、`image.mode`、排版策略等。
+7. **回答以下设计提问来驱动你的资源选择决策**（你是高级架构工程师，所有的变异组合必须严密服务于骨架系统与视觉稳定），然后决定 `page_type`、`layout_hint`、`cards[].card_type`、`chart.chart_type`、`resource_ref`、`image.mode`、排版策略等。
 
 ### 设计决策驱动提问
 
@@ -71,7 +71,8 @@
 3. **这一页和上一页的视觉感受应该有什么不同？** → 决定节奏变化
 4. **在菜单中的工具里，哪些能最好地服务上面 3 个答案？** → 决定 layout_hint、card_type、chart、resource_ref
 
-> **重要**：菜单里的工具是调色盘而非说明书。同样的数据可以用完全不同的工具和布局来表达，关键是你想让观众产生什么感受。设计原则参考文件（`references/principles/`）和数据类型映射表（`references/design-runtime/data-type-visual-mapping.md`）只在你需要灵感时查阅，不是强制执行的铁律。
+> **重要**：菜单里的工具依然是你的调色盘。同样的数据可以用完全不同的工具和布局来表达，关键是你想让观众产生什么感受。设计原则参考文件与映射表是你绝好的灵感索引，你完全可以跨界混搭布局。
+> **唯一不可妥协的底线**：你可以自由构思并调配这些高级元素，但你的产物必须是精密计算后的产物！任何 `layout_hint` 或组件调用的选择，在下游环节都必须用符合其核心语义的底层结构去精确承接。你的奇思妙想不能以牺牲布局崩塌为代价。
 
 **填写 `resources` 字段时必须说明选择理由**（推荐写入 `resources.resource_rationale`），例如回答"为什么用这个布局/组件能最好地让观众产生我想要的感受"。
 8. 将完整 planning 写入 `{{PLANNING_OUTPUT}}`。

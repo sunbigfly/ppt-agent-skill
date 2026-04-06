@@ -48,9 +48,15 @@ const path = require('path');
             waitUntil: 'domcontentloaded',
             timeout: 60000
         });
-        // 等待本地资源渲染（字体/图片 fallback 已足够）
-        await new Promise(r => setTimeout(r, 1000));
-        await new Promise(r => setTimeout(r, 1000));
+        // 智能等候字体与所有贴图实体装载完成再捕获
+        await page.evaluate(async () => {
+            await document.fonts.ready;
+            const images = Array.from(document.querySelectorAll('img'));
+            await Promise.all(images.map(img => {
+                if (img.complete) return Promise.resolve();
+                return new Promise(r => { img.onload = r; img.onerror = r; });
+            }));
+        });
 
         // 注入预打包的 dom-to-svg bundle
         await page.addScriptTag({ path: config.bundlePath });
@@ -85,17 +91,20 @@ const path = require('path');
         }
 
         if (Object.keys(imgDataMap).length > 0) {
-            await page.evaluate((dataMap) => {
+            await page.evaluate(async (dataMap) => {
                 const imgs = document.querySelectorAll('img');
+                const loadPromises = [];
                 for (const img of imgs) {
                     const origSrc = img.getAttribute('src');
                     if (origSrc && dataMap[origSrc]) {
+                        loadPromises.push(new Promise(r => {
+                            img.onload = r; img.onerror = r;
+                        }));
                         img.src = dataMap[origSrc];
                     }
                 }
+                await Promise.all(loadPromises);
             }, imgDataMap);
-            // 等待图片重新渲染
-            await new Promise(r => setTimeout(r, 300));
         }
 
         // === 预处理：将 dom-to-svg 不支持的 CSS 特性转为真实 DOM ===
@@ -541,7 +550,8 @@ const path = require('path');
                 }
             }
         });
-        await new Promise(r => setTimeout(r, 300));
+        // 等待两帧确保浏览器计算完重排重绘
+        await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 
         // === 执行 DOM -> SVG 转换 ===
         let svgString = await page.evaluate(async () => {
@@ -594,7 +604,15 @@ const path = require('path');
             waitUntil: 'domcontentloaded',
             timeout: 60000
         });
-        await new Promise(r => setTimeout(r, 1000));
+        // 智能等候字体与所有贴图实体装载完成再捕获
+        await page.evaluate(async () => {
+            await document.fonts.ready;
+            const images = Array.from(document.querySelectorAll('img'));
+            await Promise.all(images.map(img => {
+                if (img.complete) return Promise.resolve();
+                return new Promise(r => { img.onload = r; img.onerror = r; });
+            }));
+        });
         await page.pdf({
             path: item.pdf,
             width: '1280px',
@@ -633,6 +651,17 @@ def _print_raster_warning(reason: str, fix_hint: str = "") -> None:
     print(border, file=sys.stderr)
 
 
+def get_dep_dir(work_dir: Path) -> Path:
+    curr = work_dir.resolve()
+    for _ in range(5):
+        if curr.name == "ppt-output":
+            return curr
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+    return work_dir
+
+
 def ensure_deps(work_dir: Path) -> tuple:
     """安装依赖，返回 (方案名, bundle路径)
 
@@ -643,6 +672,7 @@ def ensure_deps(work_dir: Path) -> tuple:
     3. npm install dom-to-svg → 再次尝试打包
     4. 全部失败 → 降级 png-wrapper（打印 WARNING，文字不可编辑）
     """
+    dep_dir = get_dep_dir(work_dir)
     # ── 第一优先级：bundle.js 已存在，直接复用（无需安装任何依赖）────────────
     # 先查 work_dir（当前 run 目录，向后兼容已生成的 bundle）
     run_bundle = work_dir / "dom-to-svg.bundle.js"
@@ -656,15 +686,15 @@ def ensure_deps(work_dir: Path) -> tuple:
     try:
         r = subprocess.run(
             ["node", "-e", "require('puppeteer')"],
-            capture_output=True, text=True, timeout=10, cwd=str(work_dir)
+            capture_output=True, text=True, timeout=10, cwd=str(dep_dir)
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         r = None
     if r is None or r.returncode != 0:
-        print("Installing puppeteer...")
+        print(f"Installing puppeteer in {dep_dir}...")
         try:
             subprocess.run(["npm", "install", "puppeteer"],
-                           capture_output=True, text=True, timeout=180, cwd=str(work_dir))
+                           capture_output=True, text=True, timeout=180, cwd=str(dep_dir))
         except (subprocess.TimeoutExpired, FileNotFoundError):
             print("Puppeteer install unavailable, will rely on existing local deps or fallback.", file=sys.stderr)
 
@@ -673,17 +703,17 @@ def ensure_deps(work_dir: Path) -> tuple:
         try:
             res = subprocess.run(
                 ["node", "-e", "require('dom-to-svg')"],
-                capture_output=True, text=True, timeout=10, cwd=str(work_dir)
+                capture_output=True, text=True, timeout=10, cwd=str(dep_dir)
             )
             return res.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
     if not _dom_to_svg_available():
-        print("Installing dom-to-svg...")
+        print(f"Installing dom-to-svg in {dep_dir}...")
         try:
             subprocess.run(["npm", "install", "dom-to-svg"],
-                           capture_output=True, text=True, timeout=60, cwd=str(work_dir))
+                           capture_output=True, text=True, timeout=60, cwd=str(dep_dir))
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
@@ -701,7 +731,7 @@ def ensure_deps(work_dir: Path) -> tuple:
             ["npx", "-y", "esbuild", str(entry_path),
              "--bundle", "--format=iife",
              f"--outfile={_CANONICAL_BUNDLE_PATH}", "--platform=browser"],
-            capture_output=True, text=True, timeout=60, cwd=str(work_dir)
+            capture_output=True, text=True, timeout=60, cwd=str(dep_dir)
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         r = None

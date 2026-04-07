@@ -18,6 +18,12 @@
 
 ---
 
+## Runtime Style Preset Index
+
+{{STYLE_PRESET_INDEX}}
+
+---
+
 # Runtime Style Palette Index
 > 高阶动态风格构建合同
 

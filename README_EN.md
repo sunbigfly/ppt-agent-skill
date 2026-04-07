@@ -10,7 +10,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/Pipeline-6_Stages-4f7df5?style=flat-square" />
+    <img src="https://img.shields.io/badge/Pipeline-7_Stages-4f7df5?style=flat-square" />
     <img src="https://img.shields.io/badge/Styles-8_Themes-ff6b35?style=flat-square" />
     <img src="https://img.shields.io/badge/Layouts-10_Types-00d4ff?style=flat-square" />
     <img src="https://img.shields.io/badge/Charts-13_Templates-8b5cf6?style=flat-square" />
@@ -55,10 +55,10 @@ Each stage commits its artifact to disk and passes a Gate validator before the n
 
 ```
 interview-qa.txt → requirements-interview.txt
-  → search-brief.txt | source-brief.txt
+  → search.txt + search-brief.txt | source-brief.txt
   → outline.txt → style.json
   → planningN.json → slide-N.html → slide-N.png
-  → preview.html → presentation-{png,svg}.pptx
+  → preview.html → presentation-{png,svg}.pptx → delivery-manifest.json
 ```
 
 ## Showcase

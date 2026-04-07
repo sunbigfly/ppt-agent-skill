@@ -6,6 +6,7 @@
 
 1. **极致静默**：直接抛出下方的文本采访单，严禁附加寒暄、前言或“为什么要问”的解释。
 2. **严禁退化**：不支持 UI 不等于退化成填空题。必须完整输出带备选项的结构化清单（禁止变成单行密集的 `场景=；受众=...`）。
+3. 若用户直接回复“全部按默认，用 research”，主 agent 必须按默认值归纳并继续推进，不得因此卡死。
 
 ## 固定输出格式
 
@@ -31,4 +32,29 @@
 
 **D. 架构控制**
 - 模型：【A. 子代理模型同主代理】 【B. 指定更强/更快的模型:___】
+```
+
+## 归纳后的问答落点
+
+主 agent 收到文本回答后，必须先按 canonical 字段归纳，再归一化写盘：
+
+```text
+presentation_scenario -> scenario
+core_audience -> audience
+visual_style -> style
+brand_constraints -> brand
+language_mode -> language
+imagery_strategy -> imagery
+material_strategy -> material_strategy
+```
+
+若用户回复“全部按默认，用 research”，至少按以下默认落点写入：
+
+```text
+material_strategy: research
+page_density: 适中
+visual_style: 自动匹配
+language_mode: 中文
+imagery_strategy: decorate
+subagent_model_strategy: 继承主代理
 ```

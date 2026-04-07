@@ -454,29 +454,34 @@ python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUT
 ---
 
 **触发条件（任一成立）：**
+- `planningN.json` 不存在、为空或 `planning_validator.py` 不通过
 - `slide-N.html` 不存在或为空
+- `slide-N.png` 不存在或为空
 - `visual_qa.py` 退出码为 1（致命缺陷）
 - 主 agent 亲自看图发现明显视觉问题
 
 **无论同对话还是跨对话，统一两步走：**
 
-**第一步：侦查** -- 读 `outline.txt` 确认总页数，遍历所有页收集缺失页列表：
+**第一步：侦查** -- 读 `outline.txt` 确认总页数，遍历所有页收集失败页列表：
 
 ```bash
 # 对每页 1..N：
 test -s OUTPUT_DIR/planning/planningN.json && \
 test -s OUTPUT_DIR/slides/slide-N.html && \
 test -s OUTPUT_DIR/png/slide-N.png && \
-python3 SKILL_DIR/scripts/planning_validator.py OUTPUT_DIR/planning --refs SKILL_DIR/references --page N
-# exit!=0 -> 加入缺失页列表
+python3 SKILL_DIR/scripts/planning_validator.py OUTPUT_DIR/planning --refs SKILL_DIR/references --page N && \
+python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json
+# 任一 exit!=0 -> 加入失败页列表
 ```
 
-**第二步：并行重跑** -- 收集完毕，一次性并行启动所有缺失页（不串行逐页）：
+> 自动探测通过后，主 agent 仍需重新看图确认；`visual_qa.py` 不是人工审美检查的替代品。
+
+**第二步：并行重跑** -- 收集完毕，一次性并行启动所有失败页（不串行逐页）：
 
 ```bash
-# 对缺失页列表 [N1, N2, ...] 中每页，清理旧产物及可能的 review 图片残留：
+# 对失败页列表 [N1, N2, ...] 中每页，清理旧产物及可能的 review 图片残留：
 python3 -c "import os, glob; [os.remove(p) for p in ['OUTPUT_DIR/planning/planningN.json','OUTPUT_DIR/slides/slide-N.html','OUTPUT_DIR/png/slide-N.png'] + glob.glob('OUTPUT_DIR/review/round*/slide-N.png') if os.path.exists(p)]"
-# 从 4.1 开始重跑：生成 prompt -> orchestrator -> 创建 PageAgent-N
+# 从 Step 4 的 prompt 生成阶段开始重跑：先生成 prompt，再创建 PageAgent-N，随后 RUN orchestrator
 ```
 
 > session 一律视为不可续接（subagent 死亡=上下文全无），整页从 4.1 开始重跑。

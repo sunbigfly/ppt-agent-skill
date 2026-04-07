@@ -83,7 +83,7 @@ subagent FINALIZE 前自审；主 agent 回收后再跑同一 validator 复检�
 ### 2.6 执行纪律
 
 - **执行优先策略**：到达某一步后，直接执行该步的 harness/CLI 命令，不要擅自做无关探索。
-- **采访前置锁定**：进入流程后的第一条对外消息必须是 Step 0 的采访问题；**不得先做调研、资料探索或报告读取**。
+- **采访前置锁定**：完成 3.1 环境感知、`update_plan` 与 `cli-cheatsheet` 读取后，第一条**面向用户的业务交互**必须是 Step 0 的采访问题；允许把 `## 模型感知结果` / `## Subagent 操作手册` / `## 采访 UI 能力` 压缩为同一条消息里的前置状态块，但**不得先做调研、资料探索或报告读取**。
 - **阅读隔离边界**：未到对应步骤时禁止读对应阶段文件；主 agent **可读内容仅限**：`OUTPUT_DIR/**`、用户输入资料、以及 `cli-cheatsheet.md`。
 - **把脚本当做黑盒工具**：`scripts/*.py` 是执行对象，不是阅读对象！**仅允许 `python3 ...` 执行**；严禁对脚本跑 `--help` 摸索参数，严禁 `cat` 脚本源码！所需的参数全都在 `cli-cheatsheet.md` 里面。
 - 如果命令失败：首先对照 cheatsheet 核对参数形式；解决不了则立刻标记 `BLOCKED_SCRIPT_INTERFACE` 并呼叫用户裁决。
@@ -103,7 +103,7 @@ subagent FINALIZE 前自审；主 agent 回收后再跑同一 validator 复检�
 
 ### 3.1 环境感知（至关重要，Step 0 前强制完成）
 
-进入任何业务步骤前，主 agent 必须按照以下顺序执行环境感知，并将结果**显式分类输出到对话**中。这决定了整个任务的工具下限。
+进入任何业务步骤前，主 agent 必须按照以下顺序执行环境感知，并将结果**显式分类记录到对话或计划日志**中。这决定了整个任务的工具下限。若当前界面会直接暴露给用户，允许把这些结果压缩成采访消息中的前置状态块；禁止在 Step 0 前展开长篇说明。
 
 **前置操作：**
 1. 先调用 `update_plan` 创建 canonical plan。
@@ -226,8 +226,8 @@ P3.5.03 [WAIT_AGENT] FINALIZE
 P3.5.04 回收校验 style.json
 P3.5.05 关闭
 
-P4.NN.01 创建 PageAgent-NN
-P4.NN.02 harness 生成三份阶段 prompt + orchestrator prompt
+P4.NN.01 harness 生成三份阶段 prompt + orchestrator prompt
+P4.NN.02 创建 PageAgent-NN
 P4.NN.03 RUN orchestrator prompt → PageAgent 内部自主渐进完成 Planning→HTML→Review
 P4.NN.04 回收 FINALIZE → 整页终检（产物校验 + visual_qa + 主 agent 看图）
 P4.NN.05 关闭 PageAgent-NN
@@ -282,7 +282,7 @@ P5.04  写入 delivery-manifest.json
 | P2B | 压缩用户现有资料 | source-brief.txt | `contract_validator source-brief` | 回 P2B 重写 |
 | P3 | 生成大纲（内部自审） | outline.txt | `contract_validator outline` | 回退 `P3.01` 重建 Outline subagent，最多 2 轮；仍失败则 `BLOCKED_OUTLINE` 呼叫用户裁决 |
 | P3.5 | 固定全局风格 | style.json | `contract_validator style` | 回 P3.5 |
-| P4 | 并行生产各页 | planningN.json / slide-N.html / slide-N.png | `planning_validator` + 文件存在性 | 只回退该页，整页重跑 |
+| P4 | 并行生产各页 | planningN.json / slide-N.html / slide-N.png | `planning_validator` + 三件套存在性 + `visual_qa` + 主 agent 看图 | 只回退该页，整页重跑 |
 | P5 | 导出交付 | preview.html / 双 pptx / delivery-manifest.json | `contract_validator delivery-manifest` | 只回退导出 |
 
 > 所有命令完整参数见 `cli-cheatsheet.md`。
@@ -353,13 +353,13 @@ P5.04  写入 delivery-manifest.json
 4. P0+P1 清零 + visual_qa 通过后发出 `FINALIZE`
 
 - **上下文隔离**：subagent 在 Planning 阶段时不会看到 Review 的 failure modes 和 HTML 的实现细节，避免注意力分散
-- **子代理内部自检**替代主 agent 细粒度阶段间 Gate；主 agent 仅在回收 FINALIZE 后做**整页终检**（`planning_validator` + `visual_qa` + 亲自看图）
+- **子代理内部自检**替代主 agent 细粒度阶段间 Gate；主 agent 仅在回收 FINALIZE 后做**整页终检**（`planning_validator` + 三件套存在性 + `visual_qa` + 亲自看图）
 - 状态真源是文件产物和 Gate，不依赖 session 状态
 
 #### 共通规则
 
 - 各页可以且应当**并行推进**。
-- **阶段放行条件**：三件套（planningN.json + slide-N.html + slide-N.png）必须齐全，`planning_validator` 放行。
+- **阶段放行条件**：三件套（planningN.json + slide-N.html + slide-N.png）必须齐全，`planning_validator` 必须放行；整页 FINALIZE 回收后，主 agent 还必须补跑 `visual_qa` 并亲自看图，四者同时通过才算该页放行。
 - subagent 死亡 = 上下文全无。任何出错重试，旧 session 失去价值，**必须整页打回重跑（详见 Section 7）**。
 
 ### 6.9 Step 5 交付
@@ -373,11 +373,13 @@ P5.04  写入 delivery-manifest.json
 ### 7.1 Step 4 重试（两步走）
 
 **第一步：侦查** — 扫描所有页，收集触发条件（任一成立）的页号：
+- `planningN.json` 不存在、为空或 `planning_validator` 不通过
 - `slide-N.html` 不存在或为空
+- `slide-N.png` 不存在或为空
 - `visual_qa.py` 退出码为 1（致命缺陷）
 - 主 agent 亲自看图发现明显视觉问题
 
-**第二步：并行重跑** — 收集完毕后，一次性并行启动所有缺失页：清三件套及 review 图片残留 → 从 4.1 开始重跑（生成 prompt → orchestrator → 创建 PageAgent）。
+**第二步：并行重跑** — 收集完毕后，一次性并行启动所有失败页：清三件套及 review 图片残留 → 从 `P4.NN.01` 开始重跑（先生成 prompt，再创建 PageAgent，随后 RUN orchestrator）。
 
 单页连续 3 次失败 → 标记 `BLOCKED_PAGE_N`，先跳过推进其余页，最后集中处理。
 
@@ -391,11 +393,11 @@ P5.04  写入 delivery-manifest.json
 触发：用户说「继续/恢复」并提供 RUN_ID（或默认取最新目录）。
 
 1. `update_plan` 重建 canonical plan；绑定旧 RUN_ID
-2. 里程碑探测（从高到低，第一个 exit=0 为最高通过点）：
+2. 里程碑探测（从高到低，第一个 exit=0 为最高自动通过点）：
 
 ```bash
 contract_validator.py delivery-manifest ...                  # P5
-planning_validator.py ...                                    # P4
+planning_validator.py ...                                    # P4 自动下限（恢复后仍需补跑 visual_qa + 看图）
 contract_validator.py style ...                              # P3.5
 contract_validator.py outline ...                            # P3
 contract_validator.py search-brief ... | source-brief ...   # P2
@@ -403,6 +405,6 @@ contract_validator.py requirements-interview ...             # P0/P1
 ```
 
 3. 从下一未完成 step 继续；前序 Gate 失败则回退重做
-4. Step 4：读 `outline.txt` 确认总页数 → 侦查所有页三件套 → 并行重跑缺失页（旧 session 全部失效）
+4. Step 4：读 `outline.txt` 确认总页数 → 侦查所有页三件套 + `planning_validator` + `visual_qa` → 并行重跑失败页；自动项通过后，主 agent 仍需重新看图确认（旧 session 全部失效）
 
 **禁止**：依赖旧 session、跳过侦查、串行逐页处理、恢复时新建 RUN_ID（除非用户要求全新开始）。

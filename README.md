@@ -10,7 +10,7 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/流水线-6_阶段-4f7df5?style=flat-square" />
+    <img src="https://img.shields.io/badge/流水线-7_阶段-4f7df5?style=flat-square" />
     <img src="https://img.shields.io/badge/主题风格-8_套-ff6b35?style=flat-square" />
     <img src="https://img.shields.io/badge/版式类型-10_种-00d4ff?style=flat-square" />
     <img src="https://img.shields.io/badge/图表模板-13_种-8b5cf6?style=flat-square" />
@@ -62,10 +62,10 @@ P5 Preview + 双 PPTX 导出
 
 ```
 interview-qa.txt → requirements-interview.txt
-  → search-brief.txt | source-brief.txt
+  → search.txt + search-brief.txt | source-brief.txt
   → outline.txt → style.json
   → planningN.json → slide-N.html → slide-N.png
-  → preview.html → presentation-{png,svg}.pptx
+  → preview.html → presentation-{png,svg}.pptx → delivery-manifest.json
 ```
 
 ## 效果示例

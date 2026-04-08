@@ -74,7 +74,7 @@ P2A/P2B/P3/P3.5/P4 均采用渐进式上下文注入：每个节点有 orchestra
 
 `scripts/resource_loader.py` 管理 7 个运行期资源目录：
 
-- **menu 模式**：提取所有 `# 标题` + `> 引用`（多行 blockquote）-> planning 阶段消费
+- **menu 模式**：提取所有 `# 标题` + `> 引用`（多行 blockquote）-> planning 阶段消费，也可先落盘成 `runtime/page-planning-menu-N.md` 快照
 - **resolve 模式**：按 planning JSON 字段路由加载对应资源正文 -> html 阶段消费
 
 字段路由表：

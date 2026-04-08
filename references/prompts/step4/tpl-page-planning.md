@@ -34,6 +34,8 @@
 | 素材 | `{{BRIEF_PATH}}` |
 | 风格 | `{{STYLE_PATH}}` |
 | 图片素材目录 | `{{IMAGES_DIR}}` |
+| 图片清单快照 | `{{IMAGE_INVENTORY_PATH}}` |
+| 菜单快照 | `{{RESOURCE_MENU_PATH}}` |
 | SKILL 目录 | `{{SKILL_DIR}}` |
 | 资源目录 | `{{REFS_DIR}}` |
 
@@ -42,6 +44,8 @@
 ## 产物路径
 
 - 策划稿 JSON：`{{PLANNING_OUTPUT}}`
+- Runtime 备份：`{{PLANNING_RUNTIME_COPY_PATH}}`
+- Validator 报告：`{{PLANNING_VALIDATOR_REPORT_PATH}}`
 - 文件内容必须是**纯 JSON 对象**（可直接写对象，也可包在 ```json fenced block 中），不要夹杂说明性 prose。
 
 ---
@@ -52,15 +56,17 @@
 2. 深度读取 `{{REQUIREMENTS_PATH}}`，将其中的【受众画像】、【目标动作】和【版面心智】作为单页选型和内容设计的最高约束（例如：对底层技术受众放大图表卡片，对合作方主打对比及成果锚点）。
 3. 读取 `{{BRIEF_PATH}}` 获取可用素材
 4. 读取 `{{STYLE_PATH}}` 提取 `mood_keywords`、`variation_strategy`、`decoration_dna` 做情绪定调
-5. 加载本地已有的外部**图片清单**：
+5. 读取主链已生成的**图片清单快照** `{{IMAGE_INVENTORY_PATH}}`。
+6. 如需刷新这份图片清单，再执行：
    ```bash
-   python3 {{SKILL_DIR}}/scripts/resource_loader.py images --images-dir {{IMAGES_DIR}}
+   python3 {{SKILL_DIR}}/scripts/resource_loader.py images --images-dir {{IMAGES_DIR}} --output {{IMAGE_INVENTORY_PATH}}
    ```
-6. 加载支持的**组件/图表菜单**说明（菜单层，只含标题+引用摘要）：
+7. 读取主链已生成的**组件/图表菜单快照** `{{RESOURCE_MENU_PATH}}`（这是给 runtime 留档的备份，也作为你本阶段优先使用的菜单视图）。
+8. 如需刷新这份菜单快照，再执行：
    ```bash
-   python3 {{SKILL_DIR}}/scripts/resource_loader.py menu --refs-dir {{REFS_DIR}}
+   python3 {{SKILL_DIR}}/scripts/resource_loader.py menu --refs-dir {{REFS_DIR}} --output {{RESOURCE_MENU_PATH}}
    ```
-7. **回答以下设计提问来驱动你的资源选择决策**（你是高级架构工程师，所有的变异组合必须严密服务于骨架系统与视觉稳定），然后决定 `page_type`、`layout_hint`、`cards[].card_type`、`chart.chart_type`、`resource_ref`、`image.mode`、排版策略等。
+9. **回答以下设计提问来驱动你的资源选择决策**（你是高级架构工程师，所有的变异组合必须严密服务于骨架系统与视觉稳定），然后决定 `page_type`、`layout_hint`、`cards[].card_type`、`chart.chart_type`、`resource_ref`、`image.mode`、排版策略等。
 
 ### 设计决策驱动提问
 
@@ -75,14 +81,17 @@
 > **唯一不可妥协的底线**：你可以自由构思并调配这些高级元素，但你的产物必须是精密计算后的产物！任何 `layout_hint` 或组件调用的选择，在下游环节都必须用符合其核心语义的底层结构去精确承接。你的奇思妙想不能以牺牲布局崩塌为代价。
 
 **填写 `resources` 字段时必须说明选择理由**（推荐写入 `resources.resource_rationale`），例如回答"为什么用这个布局/组件能最好地让观众产生我想要的感受"。
-8. 将完整 planning 写入 `{{PLANNING_OUTPUT}}`。
-9. 自审（必须执行，不得跳过）：
+10. 将完整 planning 写入 `{{PLANNING_OUTPUT}}`，并同步备份到 `{{PLANNING_RUNTIME_COPY_PATH}}`：
    ```bash
-   python3 {{SKILL_DIR}}/scripts/planning_validator.py $(dirname {{PLANNING_OUTPUT}}) --refs {{REFS_DIR}} --page {{PAGE_NUM}}
+   cp {{PLANNING_OUTPUT}} {{PLANNING_RUNTIME_COPY_PATH}}
    ```
-10. 修复所有 ERROR（WARNING 建议修复）。
-11. 完成信号：输出 `--- STAGE 1 COMPLETE: {{PLANNING_OUTPUT}} ---`，然后按外层 orchestrator 协议继续下一阶段
-12. 不要把当前阶段的完成信号误当作整页任务结束。
+11. 自审（必须执行，不得跳过）：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/planning_validator.py $(dirname {{PLANNING_OUTPUT}}) --refs {{REFS_DIR}} --page {{PAGE_NUM}} --report {{PLANNING_VALIDATOR_REPORT_PATH}}
+   ```
+12. 修复所有 ERROR（WARNING 建议修复）。
+13. 完成信号：输出 `--- STAGE 1 COMPLETE: {{PLANNING_OUTPUT}} ---`，然后按外层 orchestrator 协议继续下一阶段
+14. 不要把当前阶段的完成信号误当作整页任务结束。
 
 ---
 

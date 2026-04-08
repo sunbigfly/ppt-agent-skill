@@ -7,7 +7,7 @@
 | 脚本 | 用途 | 调用方 |
 |------|------|--------|
 | `prompt_harness.py` | 模板变量填充，生成 subagent prompt | 主 agent |
-| `resource_loader.py` | 资源路由器（menu 菜单 / resolve 按需加载 / images 图片清单） | subagent |
+| `resource_loader.py` | 资源路由器（menu 菜单 / resolve 按需加载 / images 图片清单） | 主 agent + subagent |
 
 ## 校验工具
 
@@ -23,6 +23,7 @@
 
 - `contract_validator.py style` 现已按 runtime style 合同检查 `style_id`、`style_name`、`mood_keywords`、`design_soul`、`variation_strategy`、`decoration_dna`、`css_variables`、`font_family`
 - `resource_loader.py` 的 `menu` / `resolve` 会跳过 `runtime-*` 文件；这些文件由主链定向注入
+- Step 4 现在会先用 `resource_loader.py menu --output ...` 生成 `runtime/page-planning-menu-N.md`，既给 planning 阶段读取，也方便维护时直接检查
 - `check_skill.py` 是维护期自检，不参与运行时调度；建议改完 `tpl` / `playbook` / `cli-cheatsheet` / Step 4 schema 示例后手动跑一次
 - `smoke_skill.py` 是维护期冒烟，不参与运行时调度；它会真实调用现有 CLI，验证 Step 0 双模板按能力裁剪、Step 4 最小主链、非 `content` 页 `page-templates/` 路由、以及关键资源型 prompt 注入还能接通
 

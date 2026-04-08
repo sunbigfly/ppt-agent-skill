@@ -6,7 +6,7 @@
 
   <p>
     <a href="#quick-start"><img src="https://img.shields.io/badge/Quick_Start-blue?style=for-the-badge" alt="Quick Start" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/GPL--3.0-blue?style=for-the-badge" alt="License" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/MIT-blue?style=for-the-badge" alt="License" /></a>
   </p>
 
   <p>
@@ -103,4 +103,4 @@ Recognized by and linked to the [LINUX DO Community](https://linux.do).
 
 ## License
 
-[GPL-3.0](LICENSE)
+[MIT](LICENSE)

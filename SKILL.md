@@ -22,11 +22,11 @@ description: 专业 PPT 演示文稿全流程 AI 生成助手。模拟顶级 PPT
 - **守门规则（Gate）**：进入下个 Step 前，前序 Gate 必须通过；当前步命令执行完毕且 Gate `exit=0` 后才能标记为 `completed`。
 - 失败时只允许两种动作：`RETRY_CURRENT_STEP` 或 回退 `ROLLBACK→StepID`。**严禁"跳到后续步骤试试看"**。
 - `WAIT_USER` / `WAIT_AGENT` 是硬等待点；未收到输入/FINALIZE 前，**禁止执行后续步骤**。
-- **人工审计断点**：是否开启、介入哪些节点、可看哪些材料，必须在 Step 0 采访时写入 `requirements-interview.txt`。断点只能挂在既有主链 Step 内，且只允许主 agent 控制；subagent 不得自行向用户发问。
+- **人工审计断点**：是否开启、介入哪些节点、可看哪些材料，必须在 Step 0 采访时写入 `requirements-interview.txt`。断点只能挂在既有主链 Step 内，且只允许主 agent 控制；subagent 不得自行向用户发问。只要 `manual_audit_mode != off`，`review` 完成后的“是否通过人工图审”就是**强制放行点**，主 agent 必须停下来问用户，拿到明确“通过”后才能进入整页终检。
 
 ### 2.2 Subagent 强制调度（核心约束）
 
-**通用生命周期**：`create(--model SUBAGENT_MODEL) → RUN(prompt路径) → STATUS… → FINALIZE → close`；完成即关，不复用。Step 4 默认每页一个 PageAgent-N；若用户开启人工审计或要求返工，则由主 agent 创建阶段型 PageAgent 或 `PagePatchAgent-N`。创建时**必须**显式传 `--model SUBAGENT_MODEL`，禁止省略。`SUBAGENT_MODEL` 由用户在 Step 0 采访时指定（详见 3.1.0 及 6.2）。
+**通用生命周期**：`create(--model SUBAGENT_MODEL) → RUN(prompt路径) → STATUS… → FINALIZE → close`；完成即关，不复用。Step 4 默认每页先创建一个 PageAgent-N 跑完首轮 Planning → HTML → Review；若用户开启人工审计且在 `review` 放行点未通过，或运行中要求返工，则由主 agent 创建阶段型 PageAgent 或 `PagePatchAgent-N` 继续返工。创建时**必须**显式传 `--model SUBAGENT_MODEL`，禁止省略。`SUBAGENT_MODEL` 由用户在 Step 0 采访时指定（详见 3.1.0 及 6.2）。
 
 **上下文隔离（强制）**：无论 CLI 环境默认是否让 subagent 继承主 agent 上下文，本 skill 要求所有 subagent 必须以**隔离模式**运行——subagent 唯一可见的上下文是主 agent 通过 prompt 文件显式传递的内容。如果 CLI 支持隔离参数（如 `--no-context`、沙箱模式等），必须在《Subagent 操作手册》中记录并在调用模板中包含。主 agent 的对话历史、SKILL.md 内容、环境变量等**不应该**泄露给 subagent。
 
@@ -44,7 +44,7 @@ description: 专业 PPT 演示文稿全流程 AI 生成助手。模拟顶级 PPT
 - 上表中每个 Step 的产物**只允许对应 subagent 生成**，主 agent 内联生产任何产物 = 合同违规
 - 即使 subagent 失败，主 agent 也只能重建 subagent 重跑，不能自己"补写"产物
 - 图片模式 `generate` 且用户需要文生图时，额外创建 `ImageGen` 子代理；PageAgent 不承担文生图
-- 若用户在人工审计断点提出改单，主 agent 也**必须**通过阶段型 PageAgent 或 `PagePatchAgent-N` 返工；严禁主 agent 直接手改正式产物
+- 若用户在人工审计断点提出改单，尤其是在 `review` 后强制放行点给出“不通过”，主 agent 也**必须**通过阶段型 PageAgent 或 `PagePatchAgent-N` 返工；默认从 `review` 重开，让 subagent 继续图审 + HTML 修复；严禁主 agent 直接手改正式产物
 
 **自适应调用协议（每个业务节点强制执行）**：
 
@@ -96,6 +96,7 @@ subagent FINALIZE 前自审；主 agent 回收后再跑同一 validator 复检�
 资源文件结构：`# 标题` + `> 一句话定位（引用层）` + 正文层。消费规则：
 
 - planning 阶段：`resource_loader.py menu` 加载标题+引用层组成菜单
+- planning 阶段主链需先把 menu 结果落一份 `runtime/page-planning-menu-N.md` 备份，再让 PageAgent 读取这份快照
 - html 阶段：`resource_loader.py resolve` 按 planning JSON 字段动态加载正文层
 - 字段路由：`layout_hint→layouts/`、`page_type→page-templates/`、`card_type→blocks/`、`chart_type→charts/`
 
@@ -231,11 +232,13 @@ P3.5.03 [WAIT_AGENT] FINALIZE
 P3.5.04 回收校验 style.json
 P3.5.05 关闭
 
-P4.NN.01 harness 生成 Step 4 runtime prompt
-P4.NN.02 创建当前页 subagent（自动直通：PageAgent-NN；人工审计/返工：阶段型 PageAgent 或 PagePatchAgent-NN）
-P4.NN.03 [可选][WAIT_USER] 主 agent 在断点展示材料并收集用户意见
-P4.NN.04 回收 FINALIZE → 整页终检（产物校验 + visual_qa + 主 agent 看图）
-P4.NN.05 关闭当前页 subagent
+P4.NN.01 生成 Step 4 planning 菜单快照 + runtime prompt
+P4.NN.02 创建当前轮 subagent（首轮：PageAgent-NN；断点返工：阶段型 PageAgent 或 PagePatchAgent-NN）
+P4.NN.03 [WAIT_AGENT] 回收当前轮 FINALIZE（拿到最新 planning/html/png）
+P4.NN.04 [如 manual_audit_mode != off][WAIT_USER] 展示最新 slide-N.png，询问是否通过人工图审
+P4.NN.05 [如未通过] 创建 `PagePatchAgent-NN`（默认 `START_STAGE=review, END_STAGE=review`）执行图审 + HTML 修复，然后回到 `P4.NN.03`
+P4.NN.06 整页终检（产物校验 + visual_qa + 主 agent 看图）
+P4.NN.07 关闭当前页 subagent
 （所有页并行推进）
 
 P5.01  生成 preview.html
@@ -254,7 +257,7 @@ P5.04  写入 delivery-manifest.json
 2. harness 生成 orchestrator prompt（轻量调度，只含阶段路径 + 渐进式执行协议）
 3. 按《Subagent 操作手册》创建 subagent（必须传 `--model SUBAGENT_MODEL`）
 4. 发送 `RUN`（orchestrator prompt 路径）→ subagent 内部自主渐进式读取各阶段 → 收到 FINALIZE
-5. 主 agent 执行 gate 复检 → 不再复用时立即 close
+5. 主 agent 执行 gate 复检；若是 Step 4 且 `manual_audit_mode != off`，则 FINALIZE 后必须先经过 `review` 后的 `[WAIT_USER]` 放行点，再进入整页终检 → 不再复用时立即 close
 
 ### 5.2 真源索引
 
@@ -287,7 +290,7 @@ P5.04  写入 delivery-manifest.json
 | P2B | 压缩用户现有资料 | source-brief.txt | `contract_validator source-brief` | 回 P2B 重写 |
 | P3 | 生成大纲（内部自审） | outline.txt | `contract_validator outline` | 回退 `P3.01` 重建 Outline subagent，最多 2 轮；仍失败则 `BLOCKED_OUTLINE` 呼叫用户裁决 |
 | P3.5 | 固定全局风格 | style.json | `contract_validator style` | 回 P3.5 |
-| P4 | 并行生产各页 | planningN.json / slide-N.html / slide-N.png | `planning_validator` + 三件套存在性 + `visual_qa` + 主 agent 看图 | 只回退该页，整页重跑 |
+| P4 | 并行生产各页 | planningN.json / slide-N.html / slide-N.png | `planning_validator` + 三件套存在性 + `visual_qa` + 主 agent 看图 + （若开启）用户人工图审通过 | 只回退该页；人工图审未通过时默认从 `review` 重开 |
 | P5 | 导出交付 | preview.html / 双 pptx / delivery-manifest.json | `contract_validator delivery-manifest` | 只回退导出 |
 
 > 所有命令完整参数见 `cli-cheatsheet.md`。
@@ -356,18 +359,25 @@ P5.04  写入 delivery-manifest.json
 Step 4 只保留两种模式：
 
 1. **自动直通**：主 agent 生成标准 orchestrator prompt，PageAgent 一次跑完 Planning → HTML → Review。
-2. **人工审计**：若 `manual_audit_mode != off`，主 agent 可以在 `planning`、`html`、`review` 节点挂断点，展示最少够用的材料，等待用户意见后再继续。
+2. **人工审计**：若 `manual_audit_mode != off`，主 agent 可以在 `planning`、`html` 节点挂断点；而在 `review` 节点，用户放行是**强制任务节点**，不是可有可无的旁路。
+
+#### review 后强制放行点
+
+- 只要 `manual_audit_mode != off`，每次 PageAgent / PagePatchAgent 完成一轮 `review`、写出最新 `slide-N.png` 后，主 agent 都必须立刻 `[WAIT_USER]`。
+- 此时提问目标固定为：**是否通过人工图审**。只有拿到用户明确“通过”，该页才允许进入整页终检。
+- 若用户回答“不通过 / 继续改 / 再审一轮”，主 agent 必须默认创建 `PagePatchAgent-N`，以 `START_STAGE=review`、`END_STAGE=review` 重开，让 subagent 在保留现有 planning 与 HTML 上继续图审 + HTML 修复。
+- 只有当用户明确要求重做结构或内容布局时，返工起点才允许从 `html` 或 `planning` 重开。
 
 #### 返工原则
 
-- 用户在断点提出改单时，主 agent **只能**通过阶段型 PageAgent 或 `PagePatchAgent-N` 返工，不能自己改正式产物。
-- 返工起点只允许是 `planning` / `html` / `review` 三选一；从哪个节点重开，由主 agent 按用户要求决定。
+- 用户在断点提出改单，或在 `review` 后强制放行点明确“不通过”时，主 agent **只能**通过阶段型 PageAgent 或 `PagePatchAgent-N` 返工，不能自己改正式产物。
+- 返工起点只允许是 `planning` / `html` / `review` 三选一；其中 `review` 后人工图审未通过时，默认从 `review` 重开；只有用户明确要求重做结构时，才回退到 `html` 或 `planning`。
 - 断点材料、外挂 orchestrator 组装方式、以及 `PagePatchAgent-N` 的调用模板，都放在 `cli-cheatsheet.md` 的 Step 4 中维护。
 
 #### 共通规则
 
 - 各页可以且应当**并行推进**。
-- **阶段放行条件**：三件套（planningN.json + slide-N.html + slide-N.png）必须齐全，`planning_validator` 必须放行；整页 FINALIZE 回收后，主 agent 还必须补跑 `visual_qa` 并亲自看图，四者同时通过才算该页放行。
+- **阶段放行条件**：三件套（planningN.json + slide-N.html + slide-N.png）必须齐全，`planning_validator` 必须放行；整页 FINALIZE 回收后，主 agent 还必须补跑 `visual_qa` 并亲自看图；若开启人工审计，还必须拿到用户在 `review` 后的明确“通过”。这些条件同时满足才算该页放行。
 - subagent 死亡 = 上下文全无。任何出错重试，旧 session 失去价值，**必须整页打回重跑（详见 Section 7）**。
 
 ### 6.9 Step 5 交付
@@ -386,10 +396,11 @@ Step 4 只保留两种模式：
 - `slide-N.png` 不存在或为空
 - `visual_qa.py` 退出码为 1（致命缺陷）
 - 主 agent 亲自看图发现明显视觉问题
+- 用户在 `review` 后强制人工图审卡口明确表示未通过
 
 **第二步：并行重跑** — 收集完毕后，一次性并行启动所有失败页：清三件套及 review 图片残留 → 从 `P4.NN.01` 开始重跑（先生成 prompt，再创建 PageAgent，随后 RUN orchestrator）。
 
-若当前页正处于人工审计模式，主 agent 也可以根据用户要求，不走整页从头重跑，而是显式改用 `PagePatchAgent-N` 从 `planning/html/review` 任一指定节点重开；但最终放行标准仍与完整 Step 4 完全一致。
+若失败来源只是 `review` 后人工图审未通过，主 agent 默认不要整页从头重跑，而是保留现有 planning/html，显式改用 `PagePatchAgent-N` 从 `review` 重开；只有用户明确要求改结构，或多轮 `review` 修复仍无效，才退回 `html/planning` 或整页重跑。最终放行标准仍与完整 Step 4 完全一致。
 
 单页连续 3 次失败 → 标记 `BLOCKED_PAGE_N`，先跳过推进其余页，最后集中处理。
 
@@ -416,6 +427,6 @@ contract_validator.py requirements-interview ...             # P0/P1
 
 3. 从下一未完成 step 继续；前序 Gate 失败则回退重做
 4. Step 4：读 `outline.txt` 确认总页数 → 侦查所有页三件套 + `planning_validator` + `visual_qa` → 并行重跑失败页；自动项通过后，主 agent 仍需重新看图确认（旧 session 全部失效）
-5. 若 `requirements-interview.txt` 中记录了人工审计开启，恢复到 Step 4 时还必须把最近可用的 runtime prompt、最终 PNG 和 `review/roundX` 存档一并纳入断点材料，再决定继续直通还是走 `PagePatchAgent-N`
+5. 若 `requirements-interview.txt` 中记录了人工审计开启，恢复到 Step 4 时还必须把最近可用的 runtime prompt、最终 PNG 和 `review/roundX` 存档一并纳入断点材料；如果最近一轮 `review` 后还没有用户明确“通过人工图审”的记录，必须先恢复到这个强制 `[WAIT_USER]` 卡口，再决定是放行还是走 `PagePatchAgent-N`
 
 **禁止**：依赖旧 session、跳过侦查、串行逐页处理、恢复时新建 RUN_ID（除非用户要求全新开始）。

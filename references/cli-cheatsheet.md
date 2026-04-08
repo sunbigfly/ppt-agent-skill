@@ -325,9 +325,25 @@ python3 SKILL_DIR/scripts/contract_validator.py style OUTPUT_DIR/style.json
 
 ---
 
-### 4.1 生成三份阶段 prompt 文件
+### 4.1 生成 Planning 快照 + 三份阶段 prompt 文件
 
-依次执行三个 harness 命令（顺序不可调换）：
+先生成 planning 阶段会直接用到的 runtime 快照，再依次执行三个 harness 命令（顺序不可调换）：
+
+**4A.0 Planning 图片清单快照：**
+
+```bash
+python3 SKILL_DIR/scripts/resource_loader.py images \
+  --images-dir OUTPUT_DIR/images \
+  --output OUTPUT_DIR/runtime/page-images-N.md
+```
+
+**4A.1 Planning 菜单快照：**
+
+```bash
+python3 SKILL_DIR/scripts/resource_loader.py menu \
+  --refs-dir SKILL_DIR/references \
+  --output OUTPUT_DIR/runtime/page-planning-menu-N.md
+```
 
 **4A. Planning prompt：**
 
@@ -341,6 +357,10 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var BRIEF_PATH=CURRENT_BRIEF_PATH \
   --var STYLE_PATH=OUTPUT_DIR/style.json \
   --var IMAGES_DIR=OUTPUT_DIR/images \
+  --var IMAGE_INVENTORY_PATH=OUTPUT_DIR/runtime/page-images-N.md \
+  --var RESOURCE_MENU_PATH=OUTPUT_DIR/runtime/page-planning-menu-N.md \
+  --var PLANNING_RUNTIME_COPY_PATH=OUTPUT_DIR/runtime/page-planning-output-N.json \
+  --var PLANNING_VALIDATOR_REPORT_PATH=OUTPUT_DIR/runtime/page-planning-validator-N.json \
   --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
   --var SKILL_DIR='$SKILL_DIR' \
   --var REFS_DIR='$SKILL_DIR/references' \
@@ -359,6 +379,9 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
   --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
   --var IMAGES_DIR=OUTPUT_DIR/images \
+  --var IMAGE_INVENTORY_PATH=OUTPUT_DIR/runtime/page-images-N.md \
+  --var HTML_RESOLVE_PATH=OUTPUT_DIR/runtime/page-html-resolve-N.md \
+  --var HTML_RUNTIME_COPY_PATH=OUTPUT_DIR/runtime/page-html-output-N.html \
   --var STYLE_PATH=OUTPUT_DIR/style.json \
   --var SKILL_DIR='$SKILL_DIR' \
   --var REFS_DIR='$SKILL_DIR/references' \
@@ -377,6 +400,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
   --var PNG_OUTPUT=OUTPUT_DIR/png/slide-N.png \
   --var REVIEW_DIR=OUTPUT_DIR/review \
+  --var REVIEW_RUNTIME_PNG_PATH=OUTPUT_DIR/runtime/page-review-output-N.png \
+  --var VISUAL_QA_REPORT_PATH=OUTPUT_DIR/runtime/page-review-qa-N.txt \
   --var STYLE_PATH=OUTPUT_DIR/style.json \
   --var SKILL_DIR='$SKILL_DIR' \
   --inject-file PRINCIPLES_CHEATSHEET=SKILL_DIR/references/principles/design-principles-cheatsheet.md \
@@ -446,7 +471,7 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var END_STAGE=review \
   --var USER_AUDIT_REQUEST="用户追加的图审或改稿要求（压成一行）" \
   --var TARGET_ASSET_PATH=OUTPUT_DIR/review/round2/slide-N.png \
-  --var RUNTIME_CONTEXT_PATHS="OUTPUT_DIR/runtime/prompt-page-html-N.md; OUTPUT_DIR/runtime/prompt-page-review-N.md" \
+  --var RUNTIME_CONTEXT_PATHS="OUTPUT_DIR/runtime/prompt-page-html-N.md; OUTPUT_DIR/runtime/prompt-page-review-N.md; OUTPUT_DIR/runtime/page-html-resolve-N.md; OUTPUT_DIR/runtime/page-html-output-N.html" \
   --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
   --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
   --var PNG_OUTPUT=OUTPUT_DIR/png/slide-N.png \
@@ -626,7 +651,9 @@ python3 SKILL_DIR/scripts/contract_validator.py delivery-manifest OUTPUT_DIR/del
 菜单（planning 阶段）：
 
 ```bash
-python3 SKILL_DIR/scripts/resource_loader.py menu --refs-dir SKILL_DIR/references
+python3 SKILL_DIR/scripts/resource_loader.py menu \
+  --refs-dir SKILL_DIR/references \
+  --output OUTPUT_DIR/runtime/page-planning-menu-N.md
 ```
 
 解析（html 阶段）：

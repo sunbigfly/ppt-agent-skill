@@ -11,6 +11,9 @@
     # 批量检查所有页
     python3 scripts/visual_qa.py OUTPUT_DIR/png --planning-dir OUTPUT_DIR/planning
 
+    # 同时把文本报告写入 runtime
+    python3 scripts/visual_qa.py OUTPUT_DIR/png/slide-1.png --planning OUTPUT_DIR/planning/planning1.json --output OUTPUT_DIR/runtime/page-review-qa-1.txt
+
 退出码：
     0 = 全部通过
     1 = 存在 FAIL（致命缺陷，建议重跑该页）
@@ -324,6 +327,32 @@ def print_report(png_name: str, results: list[dict]) -> tuple[int, int]:
     return fails, warns
 
 
+def build_report_lines(png_name: str, results: list[dict]) -> tuple[list[str], int, int]:
+    """构造文本报告，同时返回 (fail_count, warn_count)。"""
+    fails = sum(1 for r in results if r["status"] == "FAIL")
+    warns = sum(1 for r in results if r["status"] == "WARN")
+    verdict = "PASS" if fails == 0 and warns == 0 else ("FAIL" if fails > 0 else "WARN")
+
+    lines = [
+        "",
+        f"{'─' * 60}",
+        f"  {png_name}",
+        f"{'─' * 60}",
+    ]
+    for r in results:
+        icon = {"PASS": "OK", "WARN": "!!", "FAIL": "XX"}[r["status"]]
+        lines.append(f"  [{icon}] {r['id']}: {r['msg']}")
+    lines.append(f"\n  verdict: {verdict}  (FAIL={fails}, WARN={warns})")
+    return lines, fails, warns
+
+
+def write_text_report(path: Path | None, text: str) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -334,6 +363,7 @@ def main():
     # 解析可选参数
     planning_path = None
     planning_dir = None
+    output_path = None
     args = sys.argv[2:]
     i = 0
     while i < len(args):
@@ -342,6 +372,9 @@ def main():
             i += 2
         elif args[i] == "--planning-dir" and i + 1 < len(args):
             planning_dir = Path(args[i + 1]).resolve()
+            i += 2
+        elif args[i] == "--output" and i + 1 < len(args):
+            output_path = Path(args[i + 1]).resolve()
             i += 2
         else:
             i += 1
@@ -361,6 +394,7 @@ def main():
 
     total_fails = 0
     total_warns = 0
+    report_lines: list[str] = []
 
     for png in pngs:
         # 自动推断 planning 路径
@@ -373,19 +407,26 @@ def main():
                 pp = planning_dir / f"planning{m.group(1)}.json"
 
         results = run_checks(png, pp)
-        f, w = print_report(png.name, results)
+        lines, f, w = build_report_lines(png.name, results)
+        report_lines.extend(lines)
+        print("\n".join(lines))
         total_fails += f
         total_warns += w
 
-    print(f"\n{'=' * 60}")
-    print(f"  TOTAL: {len(pngs)} pages, FAIL={total_fails}, WARN={total_warns}")
+    summary_lines = [
+        f"\n{'=' * 60}",
+        f"  TOTAL: {len(pngs)} pages, FAIL={total_fails}, WARN={total_warns}",
+    ]
     if total_fails > 0:
-        print(f"  EXIT 1 — 存在致命缺陷，建议重跑对应页面")
+        summary_lines.append("  EXIT 1 — 存在致命缺陷，建议重跑对应页面")
     elif total_warns > 0:
-        print(f"  EXIT 2 — 存在品质警告，建议人工复查")
+        summary_lines.append("  EXIT 2 — 存在品质警告，建议人工复查")
     else:
-        print(f"  EXIT 0 — 全部通过")
-    print(f"{'=' * 60}")
+        summary_lines.append("  EXIT 0 — 全部通过")
+    summary_lines.append(f"{'=' * 60}")
+    print("\n".join(summary_lines))
+
+    write_text_report(output_path, "\n".join(report_lines + summary_lines) + "\n")
 
     sys.exit(1 if total_fails > 0 else (2 if total_warns > 0 else 0))
 

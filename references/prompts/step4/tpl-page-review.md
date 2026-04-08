@@ -38,6 +38,8 @@
 | HTML 源文件 | `{{SLIDE_OUTPUT}}` |
 | PNG 截图输出 | `{{PNG_OUTPUT}}` |
 | 审查存档目录 | `{{REVIEW_DIR}}` |
+| Runtime PNG 备份 | `{{REVIEW_RUNTIME_PNG_PATH}}` |
+| visual_qa 报告 | `{{VISUAL_QA_REPORT_PATH}}` |
 | 参考风格 | `{{STYLE_PATH}}` |
 | 策划原稿 | `{{PLANNING_OUTPUT}}` |
 | SKILL 目录 | `{{SKILL_DIR}}` |
@@ -57,6 +59,9 @@ python3 {{SKILL_DIR}}/scripts/html2png.py {{SLIDE_OUTPUT}} -o $(dirname {{PNG_OU
 # 1b. 归档到轮次目录（每轮必须，X = 当前轮次编号）
 mkdir -p {{REVIEW_DIR}}/roundX
 cp {{PNG_OUTPUT}} {{REVIEW_DIR}}/roundX/slide-{{PAGE_NUM}}.png
+
+# 1c. 同步最新截图到 runtime 备份
+cp {{PNG_OUTPUT}} {{REVIEW_RUNTIME_PNG_PATH}}
 ```
 
 **Step 2 — 读图 + 3 遍系统扫描**
@@ -108,7 +113,7 @@ cp {{PNG_OUTPUT}} {{REVIEW_DIR}}/roundX/slide-{{PAGE_NUM}}.png
 ### 最终轮 visual_qa.py 强制调用（FINALIZE 前最后一步）
 
 ```bash
-python3 {{SKILL_DIR}}/scripts/visual_qa.py {{PNG_OUTPUT}} --planning {{PLANNING_OUTPUT}}
+python3 {{SKILL_DIR}}/scripts/visual_qa.py {{PNG_OUTPUT}} --planning {{PLANNING_OUTPUT}} --output {{VISUAL_QA_REPORT_PATH}}
 ```
 
 - 退出码 0 → 可以 FINALIZE

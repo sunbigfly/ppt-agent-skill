@@ -288,12 +288,20 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         "png": tmp_dir / "png/slide-3.png",
         "images": tmp_dir / "images",
         "runtime": tmp_dir / "runtime",
+        "image_inventory": tmp_dir / "runtime/page-images-3.md",
         "audit_request": tmp_dir / "runtime/page-audit-request-3.txt",
         "prompt_interview_structured": tmp_dir / "runtime/prompt-interview-structured.md",
         "prompt_interview_text": tmp_dir / "runtime/prompt-interview-text.md",
         "prompt_style_phase1": tmp_dir / "runtime/prompt-style-phase1.md",
+        "planning_copy": tmp_dir / "runtime/page-planning-output-3.json",
+        "planning_validator_report": tmp_dir / "runtime/page-planning-validator-3.json",
+        "resource_menu": tmp_dir / "runtime/page-planning-menu-3.md",
         "prompt_planning": tmp_dir / "runtime/prompt-page-planning-3.md",
+        "html_resolve": tmp_dir / "runtime/page-html-resolve-3.md",
+        "html_copy": tmp_dir / "runtime/page-html-output-3.html",
         "prompt_html": tmp_dir / "runtime/prompt-page-html-3.md",
+        "review_png_copy": tmp_dir / "runtime/page-review-output-3.png",
+        "visual_qa_report": tmp_dir / "runtime/page-review-qa-3.txt",
         "prompt_review": tmp_dir / "runtime/prompt-page-review-3.md",
         "prompt_orchestrator": tmp_dir / "runtime/prompt-page-orchestrator-3.md",
         "prompt_audit_request": tmp_dir / "runtime/prompt-page-audit-request-3.md",
@@ -356,7 +364,14 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         ),
     )
     fixtures["images"].mkdir(parents=True, exist_ok=True)
+    write_text(
+        fixtures["images"] / "smoke-image.svg",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"240\"><rect width=\"400\" height=\"240\" fill=\"#0f172a\"/><circle cx=\"140\" cy=\"120\" r=\"52\" fill=\"#38bdf8\" opacity=\"0.7\"/><text x=\"210\" y=\"130\" fill=\"#f8fafc\" font-size=\"36\">smoke</text></svg>",
+    )
     write_text(fixtures["planning"], json.dumps(build_content_page_fixture(), ensure_ascii=False, indent=2))
+    write_text(fixtures["slide"], "<html><body>smoke</body></html>")
+    write_text(fixtures["review_png_copy"], "placeholder png mirror")
+    write_text(fixtures["visual_qa_report"], "placeholder qa report")
     return fixtures
 
 
@@ -403,11 +418,19 @@ def run_smoke() -> SmokeResult:
                 str(REFERENCES_DIR),
                 "--page",
                 "3",
+                "--report",
+                str(fx["planning_validator_report"]),
             ],
             result,
         )
         if validator.returncode == 0:
             assert_contains("planning-validator", validator.stdout, ["OK"], result)
+            assert_contains(
+                "planning-validator-report",
+                fx["planning_validator_report"].read_text(encoding="utf-8"),
+                ['"ok": true', '"total_pages": 1'],
+                result,
+            )
 
         menu = run_cmd(
             "resource-loader-menu",
@@ -416,6 +439,49 @@ def run_smoke() -> SmokeResult:
         )
         if menu.returncode == 0:
             assert_contains("resource-loader-menu", menu.stdout, ["### layouts/", "#### hero-top", "### blocks/"], result)
+
+        images_snapshot = run_cmd(
+            "resource-loader-images-snapshot",
+            [
+                py,
+                str(SCRIPTS_DIR / "resource_loader.py"),
+                "images",
+                "--images-dir",
+                str(fx["images"]),
+                "--output",
+                str(fx["image_inventory"]),
+            ],
+            result,
+        )
+        if images_snapshot.returncode == 0:
+            assert_contains(
+                "resource-loader-images-snapshot",
+                fx["image_inventory"].read_text(encoding="utf-8"),
+                ["smoke-image.svg"],
+                result,
+            )
+
+        menu_snapshot = run_cmd(
+            "resource-loader-menu-snapshot",
+            [
+                py,
+                str(SCRIPTS_DIR / "resource_loader.py"),
+                "menu",
+                "--refs-dir",
+                str(REFERENCES_DIR),
+                "--output",
+                str(fx["resource_menu"]),
+            ],
+            result,
+        )
+        if menu_snapshot.returncode == 0:
+            snapshot_text = fx["resource_menu"].read_text(encoding="utf-8")
+            assert_contains(
+                "resource-loader-menu-snapshot",
+                snapshot_text,
+                ["### layouts/", "#### hero-top", "### blocks/"],
+                result,
+            )
 
         resolve = run_cmd(
             "resource-loader-resolve",
@@ -446,6 +512,29 @@ def run_smoke() -> SmokeResult:
             )
             assert_no_unfilled_vars("resource-loader-resolve", resolve.stdout, result)
 
+        resolve_snapshot = run_cmd(
+            "resource-loader-resolve-snapshot",
+            [
+                py,
+                str(SCRIPTS_DIR / "resource_loader.py"),
+                "resolve",
+                "--refs-dir",
+                str(REFERENCES_DIR),
+                "--planning",
+                str(fx["planning"]),
+                "--output",
+                str(fx["html_resolve"]),
+            ],
+            result,
+        )
+        if resolve_snapshot.returncode == 0:
+            assert_contains(
+                "resource-loader-resolve-snapshot",
+                fx["html_resolve"].read_text(encoding="utf-8"),
+                ["# 顶部英雄式版式", "# KPI 指标卡（数字+趋势箭头+标签）"],
+                result,
+            )
+
         images = run_cmd(
             "resource-loader-images",
             [
@@ -458,7 +547,7 @@ def run_smoke() -> SmokeResult:
             result,
         )
         if images.returncode == 0:
-            assert_contains("resource-loader-images", images.stdout, ["count: 0", "(empty)"], result)
+            assert_contains("resource-loader-images", images.stdout, ["count: 1", "smoke-image.svg"], result)
 
         for page_type, expected_title in PAGE_TEMPLATE_EXPECTATIONS.items():
             planning_dir = tmp_dir / f"planning-{page_type}"
@@ -587,6 +676,14 @@ def run_smoke() -> SmokeResult:
                     "--var",
                     f"IMAGES_DIR={fx['images']}",
                     "--var",
+                    f"IMAGE_INVENTORY_PATH={fx['image_inventory']}",
+                    "--var",
+                    f"RESOURCE_MENU_PATH={fx['resource_menu']}",
+                    "--var",
+                    f"PLANNING_RUNTIME_COPY_PATH={fx['planning_copy']}",
+                    "--var",
+                    f"PLANNING_VALIDATOR_REPORT_PATH={fx['planning_validator_report']}",
+                    "--var",
                     f"PLANNING_OUTPUT={fx['planning']}",
                     "--var",
                     f"SKILL_DIR={ROOT_DIR}",
@@ -619,6 +716,12 @@ def run_smoke() -> SmokeResult:
                     "--var",
                     f"IMAGES_DIR={fx['images']}",
                     "--var",
+                    f"IMAGE_INVENTORY_PATH={fx['image_inventory']}",
+                    "--var",
+                    f"HTML_RESOLVE_PATH={fx['html_resolve']}",
+                    "--var",
+                    f"HTML_RUNTIME_COPY_PATH={fx['html_copy']}",
+                    "--var",
                     f"STYLE_PATH={fx['style']}",
                     "--var",
                     f"SKILL_DIR={ROOT_DIR}",
@@ -648,6 +751,10 @@ def run_smoke() -> SmokeResult:
                     f"SLIDE_OUTPUT={fx['slide']}",
                     "--var",
                     f"PNG_OUTPUT={fx['png']}",
+                    "--var",
+                    f"REVIEW_RUNTIME_PNG_PATH={fx['review_png_copy']}",
+                    "--var",
+                    f"VISUAL_QA_REPORT_PATH={fx['visual_qa_report']}",
                     "--var",
                     f"STYLE_PATH={fx['style']}",
                     "--var",
@@ -683,7 +790,7 @@ def run_smoke() -> SmokeResult:
                     "--var",
                     "TARGET_ASSET_PATH=none",
                     "--var",
-                    "RUNTIME_CONTEXT_PATHS=none",
+                    f"RUNTIME_CONTEXT_PATHS={fx['prompt_html']}; {fx['prompt_review']}; {fx['html_resolve']}; {fx['image_inventory']}",
                     "--var",
                     f"PLANNING_OUTPUT={fx['planning']}",
                     "--var",
@@ -813,16 +920,34 @@ def run_smoke() -> SmokeResult:
                     assert_contains(
                         label,
                         rendered,
-                        ["# Page Planning Playbook -- 单页策划稿", "# 设计原则速查表 -- Step 4 字段级操作手册"],
+                        [
+                            "# Page Planning Playbook -- 单页策划稿",
+                            "# 设计原则速查表 -- Step 4 字段级操作手册",
+                            str(fx["image_inventory"]),
+                            str(fx["resource_menu"]),
+                            "主链已生成的**组件/图表菜单快照**",
+                            str(fx["planning_copy"]),
+                            str(fx["planning_validator_report"]),
+                        ],
                         result,
                     )
                 if label == "prompt-page-html":
-                    assert_contains(label, rendered, ["# Page HTML Playbook -- 单页 HTML 设计稿"], result)
+                    assert_contains(
+                        label,
+                        rendered,
+                        ["# Page HTML Playbook -- 单页 HTML 设计稿", str(fx["html_resolve"]), str(fx["html_copy"])],
+                        result,
+                    )
                 if label == "prompt-page-review":
                     assert_contains(
                         label,
                         rendered,
-                        ["# Page Visual Review & Fix Playbook -- 单页图审与 HTML 修复", "# Runtime Failure Modes"],
+                        [
+                            "# Page Visual Review & Fix Playbook -- 单页图审与 HTML 修复",
+                            "# Runtime Failure Modes",
+                            str(fx["review_png_copy"]),
+                            str(fx["visual_qa_report"]),
+                        ],
                         result,
                     )
                 if label == "prompt-page-audit-request":
@@ -834,6 +959,7 @@ def run_smoke() -> SmokeResult:
                             "start_stage: html",
                             "end_stage: review",
                             "user_request: 把主标题收敛一点，并重点检查右侧图卡和指标层级",
+                            str(fx["html_resolve"]),
                         ],
                         result,
                     )

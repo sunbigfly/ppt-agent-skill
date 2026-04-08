@@ -6,7 +6,7 @@
 
   <p>
     <a href="#快速开始"><img src="https://img.shields.io/badge/快速开始-blue?style=for-the-badge" alt="Quick Start" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/GPL--3.0-blue?style=for-the-badge" alt="License" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/MIT-blue?style=for-the-badge" alt="License" /></a>
   </p>
 
   <p>
@@ -110,4 +110,4 @@ ppt-agent-skill/
 
 ## License
 
-[GPL-3.0](LICENSE)
+[MIT](LICENSE)

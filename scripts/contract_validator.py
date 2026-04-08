@@ -31,6 +31,57 @@ from planning_validator import load_jsonish, load_planning_pages
 
 PASS_WORDS = {"pass", "passed", "通过", "已通过", "ok"}
 FAIL_WORDS = {"fail", "failed", "不通过", "未通过", "reject", "rejected"}
+STAGE_ORDER = {"planning": 0, "html": 1, "review": 2}
+ANCHOR_LINE_PATTERN = re.compile(r"^\s*(?:[-*]\s*)?([A-Za-z_][A-Za-z0-9_-]*)\s*[：:]\s*(.+?)\s*$")
+REQUIRED_INTERVIEW_DIMENSIONS = [
+    ("scenario", ["场景", "使用场景", "应用场景", "scenario"]),
+    ("audience", ["受众", "听众", "对象", "audience"]),
+    ("target_action", ["目标动作", "希望动作", "行动", "target_action"]),
+    ("expected_pages", ["期望页数", "页数", "expected_pages"]),
+    ("page_density", ["密度", "信息密度", "page_density"]),
+    ("style", ["风格", "视觉风格", "style:"]),
+    ("brand", ["品牌", "logo", "品牌色", "brand:"]),
+    ("must_include", ["必含", "必须包含", "必须有", "must_include"]),
+    ("must_avoid", ["必避", "避免", "禁用", "must_avoid"]),
+    ("language", ["语言", "中文", "英文", "中英", "language:"]),
+    ("imagery", ["配图", "图片", "图像", "插图", "imagery", "image_mode"]),
+    ("material_strategy", ["资料使用策略", "资料策略", "素材使用", "引用策略", "material_strategy", "materials_strategy"]),
+    ("subagent_model_strategy", ["subagent_model_strategy", "后续子系统使用什么模型", "模型", "subagent model"]),
+    ("subagent_thinking_effort", ["subagent_thinking_effort", "思考深度", "推理等级", "reasoning effort"]),
+    ("manual_audit_mode", ["manual_audit_mode", "人工审计", "中间审计", "断点"]),
+    ("manual_audit_scope", ["manual_audit_scope", "介入节点", "审计节点", "scope"]),
+    ("manual_audit_assets", ["manual_audit_assets", "审计材料", "runtime 文件", "指定图片"]),
+]
+REQUIRED_INTERVIEW_ANCHORS = [
+    "scenario",
+    "audience",
+    "target_action",
+    "expected_pages",
+    "page_density",
+    "style",
+    "brand",
+    "must_include",
+    "must_avoid",
+    "language",
+    "imagery",
+    "material_strategy",
+    "subagent_model_strategy",
+    "subagent_thinking_effort",
+    "manual_audit_mode",
+    "manual_audit_scope",
+    "manual_audit_assets",
+]
+REQUIRED_AUDIT_REQUEST_FIELDS = [
+    "page_number",
+    "start_stage",
+    "end_stage",
+    "user_request",
+    "target_asset_path",
+    "runtime_context_paths",
+    "planning_output",
+    "html_output",
+    "png_output",
+]
 
 
 @dataclass
@@ -98,24 +149,38 @@ def contains_any(text: str, words: list[str]) -> bool:
     return any(word.lower() in lowered for word in words)
 
 
+def extract_anchor_fields(text: str) -> dict[str, str]:
+    anchors: dict[str, str] = {}
+    for line in text.splitlines():
+        matched = ANCHOR_LINE_PATTERN.match(line)
+        if not matched:
+            continue
+        key = matched.group(1).strip().lower().replace("-", "_")
+        value = matched.group(2).strip()
+        if value:
+            anchors[key] = value
+    return anchors
+
+
+def validate_required_anchor_fields(
+    anchors: dict[str, str],
+    required_fields: list[str],
+    result: ValidationResult,
+    label: str,
+) -> list[str]:
+    matched: list[str] = []
+    for field_name in required_fields:
+        if is_non_empty_string(anchors.get(field_name)):
+            matched.append(field_name)
+        else:
+            result.error(f"{label}: missing required canonical anchor `{field_name}`")
+    return matched
+
+
 def validate_topics_coverage(text: str, result: ValidationResult, label: str) -> list[str]:
     # 每个维度同时支持中文标题（tpl-interview.md 规范格式）和英文键名（LLM 自由格式兼容）
-    required_dimensions = [
-        ("scene", ["场景", "使用场景", "应用场景", "scenario"]),
-        ("audience", ["受众", "听众", "对象", "audience"]),
-        ("target_action", ["目标动作", "希望动作", "行动", "target_action"]),
-        ("page_density", ["页数", "密度", "信息密度", "page_density"]),
-        ("style", ["风格", "视觉风格", "style:"]),
-        ("brand", ["品牌", "logo", "品牌色", "brand:"]),
-        ("must_include", ["必含", "必须包含", "必须有", "must_include"]),
-        ("must_avoid", ["必避", "避免", "禁用", "must_avoid"]),
-        ("language", ["语言", "中文", "英文", "中英", "language:"]),
-        ("imagery", ["配图", "图片", "图像", "插图", "imagery", "image_mode"]),
-        ("material_strategy", ["资料使用策略", "资料策略", "素材使用", "引用策略", "material_strategy", "materials_strategy"]),
-    ]
-
     matched: list[str] = []
-    for key, keywords in required_dimensions:
+    for key, keywords in REQUIRED_INTERVIEW_DIMENSIONS:
         if contains_any(text, keywords):
             matched.append(key)
         else:
@@ -125,9 +190,12 @@ def validate_topics_coverage(text: str, result: ValidationResult, label: str) ->
 
 def validate_interview(path: Path) -> tuple[ValidationResult, dict[str, Any]]:
     result, summary, text = basic_text_gate(path, "interview-qa", min_chars=120, min_lines=8)
-    if not result.errors:
-        matched = validate_topics_coverage(text, result, "interview-qa")
-        summary["matched_dimensions"] = matched
+    matched = validate_topics_coverage(text, result, "interview-qa")
+    anchors = extract_anchor_fields(text)
+    matched_anchors = validate_required_anchor_fields(anchors, REQUIRED_INTERVIEW_ANCHORS, result, "interview-qa")
+    summary["matched_dimensions"] = matched
+    summary["matched_anchor_fields"] = matched_anchors
+    summary["anchor_fields_present"] = sorted(anchors.keys())
     summary["errors"] = len(result.errors)
     summary["warnings"] = len(result.warnings)
     return result, summary
@@ -136,11 +204,15 @@ def validate_interview(path: Path) -> tuple[ValidationResult, dict[str, Any]]:
 def validate_requirements_interview(path: Path) -> tuple[ValidationResult, dict[str, Any]]:
     result, summary, text = basic_text_gate(path, "requirements-interview", min_chars=120, min_lines=8)
     matched = validate_topics_coverage(text, result, "requirements-interview")
+    anchors = extract_anchor_fields(text)
+    matched_anchors = validate_required_anchor_fields(anchors, REQUIRED_INTERVIEW_ANCHORS, result, "requirements-interview")
 
     if not contains_any(text, ["branch", "分支", "research", "直接制作", "现有资料"]):
         result.warn("requirements-interview: branch decision is not explicit")
 
     summary["matched_dimensions"] = matched
+    summary["matched_anchor_fields"] = matched_anchors
+    summary["anchor_fields_present"] = sorted(anchors.keys())
     summary["errors"] = len(result.errors)
     summary["warnings"] = len(result.warnings)
     return result, summary
@@ -255,6 +327,93 @@ def validate_page_review(path: Path, require_pass: bool) -> tuple[ValidationResu
         "errors": len(result.errors),
         "warnings": len(result.warnings),
     }
+    return result, summary
+
+
+def normalize_stage(label: str, value: Any, result: ValidationResult) -> str | None:
+    if not is_non_empty_string(value):
+        result.error(f"{label}: must be a non-empty string")
+        return None
+    stage = str(value).strip().lower()
+    if stage not in STAGE_ORDER:
+        result.error(f"{label}: invalid stage {value!r}, expected one of {sorted(STAGE_ORDER)}")
+        return None
+    return stage
+
+
+def split_runtime_context_paths(value: str) -> list[str]:
+    return [item.strip() for item in str(value).split(";") if item.strip()]
+
+
+def validate_page_audit_request(path: Path, base_dir: Path | None) -> tuple[ValidationResult, dict[str, Any]]:
+    result, summary, text = basic_text_gate(path, "page-audit-request", min_chars=80, min_lines=8)
+    anchors = extract_anchor_fields(text)
+    matched = validate_required_anchor_fields(anchors, REQUIRED_AUDIT_REQUEST_FIELDS, result, "page-audit-request")
+
+    page_number_raw = anchors.get("page_number")
+    page_number: int | None = None
+    if is_non_empty_string(page_number_raw):
+        try:
+            page_number = int(str(page_number_raw).strip())
+            if page_number <= 0:
+                raise ValueError
+        except ValueError:
+            result.error("page-audit-request: page_number must be a positive integer")
+
+    start_stage = normalize_stage("page-audit-request.start_stage", anchors.get("start_stage"), result)
+    end_stage = normalize_stage("page-audit-request.end_stage", anchors.get("end_stage"), result)
+    if start_stage and end_stage and STAGE_ORDER[start_stage] > STAGE_ORDER[end_stage]:
+        result.error("page-audit-request: start_stage cannot be later than end_stage")
+
+    user_request = anchors.get("user_request")
+    if is_non_empty_string(user_request) and len(str(user_request).strip()) < 6:
+        result.error("page-audit-request: user_request is too short")
+
+    target_asset_path = anchors.get("target_asset_path", "")
+    runtime_context_raw = anchors.get("runtime_context_paths", "")
+    runtime_context_paths = split_runtime_context_paths(runtime_context_raw) if is_non_empty_string(runtime_context_raw) else []
+
+    if is_non_empty_string(target_asset_path) and str(target_asset_path).strip().lower() != "none":
+        if base_dir is None:
+            result.warn("page-audit-request: cannot verify target_asset_path existence without --base-dir")
+        else:
+            resolved_target = resolve_artifact_path(base_dir, target_asset_path)
+            if resolved_target is None or not resolved_target.exists():
+                result.error(f"page-audit-request.target_asset_path: path does not exist -> {target_asset_path}")
+
+    if runtime_context_raw and runtime_context_raw.strip().lower() != "none":
+        if not runtime_context_paths:
+            result.error("page-audit-request: runtime_context_paths must contain at least one path or be `none`")
+        elif base_dir is None:
+            result.warn("page-audit-request: cannot verify runtime_context_paths without --base-dir")
+        else:
+            for item in runtime_context_paths:
+                resolved_item = resolve_artifact_path(base_dir, item)
+                if resolved_item is None or not resolved_item.exists():
+                    result.error(f"page-audit-request.runtime_context_paths: path does not exist -> {item}")
+
+    planning_output = anchors.get("planning_output")
+    html_output = anchors.get("html_output")
+    png_output = anchors.get("png_output")
+
+    if base_dir is not None and start_stage in {"html", "review"} and is_non_empty_string(planning_output):
+        resolved_planning = resolve_artifact_path(base_dir, planning_output)
+        if resolved_planning is None or not resolved_planning.exists():
+            result.error(f"page-audit-request.planning_output: expected existing planning artifact -> {planning_output}")
+
+    if base_dir is not None and start_stage == "review" and is_non_empty_string(html_output):
+        resolved_html = resolve_artifact_path(base_dir, html_output)
+        if resolved_html is None or not resolved_html.exists():
+            result.error(f"page-audit-request.html_output: expected existing html artifact -> {html_output}")
+
+    summary["matched_anchor_fields"] = matched
+    summary["page_number"] = page_number
+    summary["start_stage"] = start_stage
+    summary["end_stage"] = end_stage
+    summary["runtime_context_count"] = len(runtime_context_paths)
+    summary["has_target_asset"] = bool(is_non_empty_string(target_asset_path) and target_asset_path.strip().lower() != "none")
+    summary["errors"] = len(result.errors)
+    summary["warnings"] = len(result.warnings)
     return result, summary
 
 
@@ -624,6 +783,12 @@ def main() -> int:
     review.add_argument("--strict", action="store_true", help="Treat warnings as failures")
     review.add_argument("--report", help="Optional JSON report path")
 
+    audit_request = subparsers.add_parser("page-audit-request", help="Validate one Step 4 audit patch request")
+    audit_request.add_argument("path", help="Path to page-audit-request.txt")
+    audit_request.add_argument("--base-dir", help="Base directory for resolving relative artifact paths")
+    audit_request.add_argument("--strict", action="store_true", help="Treat warnings as failures")
+    audit_request.add_argument("--report", help="Optional JSON report path")
+
     manifest = subparsers.add_parser("delivery-manifest", help="Validate delivery-manifest.json")
     manifest.add_argument("path", help="Path to delivery-manifest.json")
     manifest.add_argument("--base-dir", help="Base directory for resolving relative artifact paths")
@@ -665,6 +830,9 @@ def main() -> int:
             result, payload = validate_images(target, bool(args.require_paths))
         elif args.command == "page-review":
             result, payload = validate_page_review(target, bool(args.require_pass))
+        elif args.command == "page-audit-request":
+            base_dir = Path(args.base_dir).resolve() if getattr(args, "base_dir", None) else None
+            result, payload = validate_page_audit_request(target, base_dir)
         elif args.command == "html":
             result, payload = validate_html(target, getattr(args, "page_type", ""))
         else:

@@ -13,7 +13,7 @@
 
 | 脚本 | 用途 | 调用方 |
 |------|------|--------|
-| `contract_validator.py` | 合同校验（`interview` / `requirements-interview` / `search` / `search-brief` / `source-brief` / `outline` / `style` / `images` / `page-review` / `delivery-manifest`） | 主 agent |
+| `contract_validator.py` | 合同校验（`interview` / `requirements-interview` / `search` / `search-brief` / `source-brief` / `outline` / `style` / `images` / `page-review` / `page-audit-request` / `delivery-manifest`） | 主 agent |
 | `planning_validator.py` | Step 4 planning JSON 单页/全量验证 | subagent 自审 + 主 agent gate |
 | `milestone_check.py` | 按里程碑阶段验收 | 主 agent |
 | `check_skill.py` | 检查 markdown / prompt / validator / 资源之间的协议漂移 | skill 作者 / 维护者 |

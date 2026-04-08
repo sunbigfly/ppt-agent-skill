@@ -7,9 +7,9 @@
 
 作为系统首个守门节点，必须以最高效的轮次获取极高信噪比的输入。核心目标：不与用户寒暄，直接锁定能左右大纲结构、视觉风格和管线分支的关键维度参数。
 
-## 必须覆盖的 4 组维度
+## 必须覆盖的 4 组维度（另加 1 组人工审计扩展）
 
-你向用户抛出的选项，必须精准涵盖以下四个维度域。
+你向用户抛出的选项，必须精准涵盖基础 4 组维度域，并额外补上 1 组人工审计扩展维度。
 
 ### A. 业务场景与传达目标
 
@@ -41,6 +41,13 @@
 
 - `success_criteria`: 用户评价标准
 - `subagent_model_strategy`: 继承主代理 / 指定更强模型 / 指定更快模型
+- `subagent_thinking_effort`: 低 / 中 / 高
+
+### E. 人工审计与断点控制
+
+- `manual_audit_mode`: `off`（不参与） / `milestone_only`（只看关键节点） / `fine_grained`（细颗粒度断点）
+- `manual_audit_scope`: 想介入哪些节点，如 `outline` / `style` / `page_planning` / `page_html` / `page_review`
+- `manual_audit_assets`: `summary_only`（只看主 agent 摘要） / `png_only`（看图） / `runtime_and_selected_assets`（允许直接点 runtime / html / 指定审查图）
 
 ## 字段归一化映射
 
@@ -60,14 +67,19 @@
 | `language_mode` | `language` |
 | `imagery_strategy` | `imagery` |
 | `material_strategy` | `material_strategy` |
+| `subagent_model_strategy` | `subagent_model_strategy` |
+| `subagent_thinking_effort` | `subagent_thinking_effort` |
+| `manual_audit_mode` | `manual_audit_mode` |
+| `manual_audit_scope` | `manual_audit_scope` |
+| `manual_audit_assets` | `manual_audit_assets` |
 
 ## `interview-qa.txt` 写盘锚点（强制）
 
 所有问卷结果必须映射到以下两份产物，作为后续子代理的真源输入。
 
 1. `interview-qa.txt`
-   保留用户原意。为通过 `contract_validator.py` 强校验，结尾必须附加 canonical 锚点段，以下 12 个锚点缺一不可：
-   `scenario`, `audience`, `target_action`, `expected_pages`, `page_density`, `style`, `brand`, `must_include`, `must_avoid`, `language`, `imagery`, `material_strategy`
+   保留用户原意。为通过 `contract_validator.py` 强校验，结尾必须附加 canonical 锚点段。基础 12 个锚点缺一不可，同时默认追加模型与人工审计锚点：
+   `scenario`, `audience`, `target_action`, `expected_pages`, `page_density`, `style`, `brand`, `must_include`, `must_avoid`, `language`, `imagery`, `material_strategy`, `subagent_model_strategy`, `subagent_thinking_effort`, `manual_audit_mode`, `manual_audit_scope`, `manual_audit_assets`
 
 2. `requirements-interview.txt`
-   脱水的纯净参数组，同样必须包含上方 12 个锚点维度，并带上丰富化后的明确取值，供 validator、Style、Outline 与后续 PageAgent 直接消费。
+   脱水的纯净参数组，同样必须包含上方基础 12 个锚点，以及模型 / 人工审计锚点，并带上丰富化后的明确取值，供 validator、Style、Outline、PageAgent 与后续人工返工节点直接消费。

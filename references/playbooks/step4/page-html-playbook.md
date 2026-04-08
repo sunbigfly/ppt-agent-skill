@@ -61,6 +61,7 @@ python3 SKILL_DIR/scripts/resource_loader.py resolve --refs-dir REFS_DIR --plann
 - `role = anchor` 的卡必须成为全页第一视觉落点；`support/context` 退后，但不能消失。
 - 若卡片带 `chart.chart_type`，最终图表类型必须与 planning 保持一致；不要把 `comparison_bar` 偷换成普通 list。
 - 若 `source_guidance` 要求保留来源，至少在卡片 footer / caption / 注释位中给出来源提示。
+- **【反泄漏清扫防线】**：在你把 JSON 里的 `body` 和 `headline` 填入 HTML 标签时，如果读到了明显的**“旁白解说”、“排版动作”**（例如：“这一页先做铺垫，最后收束到结论”等废话），**绝对不准老实巴交地把它渲染在大屏幕上！** 这是前置 Planning 代理漏掉的导演指导语，你必须主动充当最后一道防火墙将其直接剔除，或自行将其改写为干货文案！
 
 ---
 

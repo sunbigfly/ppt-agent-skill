@@ -278,6 +278,7 @@ def build_non_content_page(page_type: str) -> dict[str, object]:
 
 def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
     fixtures = {
+        "interview": tmp_dir / "interview-qa.txt",
         "requirements": tmp_dir / "requirements-interview.txt",
         "outline": tmp_dir / "outline.txt",
         "brief": tmp_dir / "search-brief.txt",
@@ -287,6 +288,7 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         "png": tmp_dir / "png/slide-3.png",
         "images": tmp_dir / "images",
         "runtime": tmp_dir / "runtime",
+        "audit_request": tmp_dir / "runtime/page-audit-request-3.txt",
         "prompt_interview_structured": tmp_dir / "runtime/prompt-interview-structured.md",
         "prompt_interview_text": tmp_dir / "runtime/prompt-interview-text.md",
         "prompt_style_phase1": tmp_dir / "runtime/prompt-style-phase1.md",
@@ -294,11 +296,27 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         "prompt_html": tmp_dir / "runtime/prompt-page-html-3.md",
         "prompt_review": tmp_dir / "runtime/prompt-page-review-3.md",
         "prompt_orchestrator": tmp_dir / "runtime/prompt-page-orchestrator-3.md",
+        "prompt_audit_request": tmp_dir / "runtime/prompt-page-audit-request-3.md",
+        "prompt_breakpoint": tmp_dir / "runtime/prompt-page-breakpoint-3.md",
     }
 
     write_text(
+        fixtures["interview"],
+        "# 采访纪要\n\n用户要做一份 4 页的 Linux.do 社区介绍，目标是让新用户快速理解定位并愿意加入。\n\nscenario: 社区介绍\n"
+        "audience: 新用户与潜在参与者\ntarget_action: 建立认知并愿意加入\nexpected_pages: 4\npage_density: 适中\n"
+        "style: 极简商务\nbrand: 保持社区感与克制气质\nmust_include: 社区定位、氛围、价值、加入理由\n"
+        "must_avoid: 不要写成广告页\nlanguage: 中文\nimagery: decorate\nmaterial_strategy: research\n"
+        "subagent_model_strategy: 继承主代理\nsubagent_thinking_effort: 中等\nmanual_audit_mode: fine_grained\n"
+        "manual_audit_scope: page_html, page_review\nmanual_audit_assets: runtime_and_selected_assets\n",
+    )
+    write_text(
         fixtures["requirements"],
-        "# 需求归一化\n\n## 基本信息\n- 主题：Smoke Test\n- 项目类型：演示文稿\n- 语言：中文\n- 输入类型：示例\n- 分支：research\n",
+        "# 需求归一化\n\nscenario: 社区介绍\naudience: 新用户与潜在参与者\ntarget_action: 建立认知并愿意加入\n"
+        "expected_pages: 4\npage_density: 适中\nstyle: 极简商务\nbrand: 保持社区感与克制气质\n"
+        "must_include: 社区定位、氛围、价值、加入理由\nmust_avoid: 不要写成广告页\nlanguage: 中文\n"
+        "imagery: decorate\nmaterial_strategy: research\nsubagent_model_strategy: 继承主代理\n"
+        "subagent_thinking_effort: 中等\nmanual_audit_mode: fine_grained\nmanual_audit_scope: page_html, page_review\n"
+        "manual_audit_assets: runtime_and_selected_assets\nbranch: research\n",
     )
     write_text(fixtures["outline"], "# 大纲\n\n## Part 1: Demo\n\n### 第 3 页：增长判断\n- 页目标：增长成立\n")
     write_text(fixtures["brief"], "# Research Brief\n\n## 核心发现\n1. 示例发现 [来源: smoke]\n")
@@ -348,6 +366,32 @@ def run_smoke() -> SmokeResult:
         tmp_dir = Path(tmp)
         fx = build_fixture_tree(tmp_dir)
         py = sys.executable
+
+        interview_contract = run_cmd(
+            "contract-validator-interview",
+            [
+                py,
+                str(SCRIPTS_DIR / "contract_validator.py"),
+                "interview",
+                str(fx["interview"]),
+            ],
+            result,
+        )
+        if interview_contract.returncode == 0:
+            assert_contains("contract-validator-interview", interview_contract.stdout, ["OK"], result)
+
+        requirements_contract = run_cmd(
+            "contract-validator-requirements",
+            [
+                py,
+                str(SCRIPTS_DIR / "contract_validator.py"),
+                "requirements-interview",
+                str(fx["requirements"]),
+            ],
+            result,
+        )
+        if requirements_contract.returncode == 0:
+            assert_contains("contract-validator-requirements", requirements_contract.stdout, ["OK"], result)
 
         validator = run_cmd(
             "planning-validator",
@@ -621,6 +665,36 @@ def run_smoke() -> SmokeResult:
                 ],
             ),
             (
+                "prompt-page-audit-request",
+                fx["prompt_audit_request"],
+                [
+                    py,
+                    str(SCRIPTS_DIR / "prompt_harness.py"),
+                    "--template",
+                    str(REFERENCES_DIR / "prompts/step4/tpl-page-audit-request.md"),
+                    "--var",
+                    "PAGE_NUM=3",
+                    "--var",
+                    "START_STAGE=html",
+                    "--var",
+                    "END_STAGE=review",
+                    "--var",
+                    "USER_AUDIT_REQUEST=把主标题收敛一点，并重点检查右侧图卡和指标层级",
+                    "--var",
+                    "TARGET_ASSET_PATH=none",
+                    "--var",
+                    "RUNTIME_CONTEXT_PATHS=none",
+                    "--var",
+                    f"PLANNING_OUTPUT={fx['planning']}",
+                    "--var",
+                    f"SLIDE_OUTPUT={fx['slide']}",
+                    "--var",
+                    f"PNG_OUTPUT={fx['png']}",
+                    "--output",
+                    str(fx["prompt_audit_request"]),
+                ],
+            ),
+            (
                 "prompt-page-orchestrator",
                 fx["prompt_orchestrator"],
                 [
@@ -646,6 +720,46 @@ def run_smoke() -> SmokeResult:
                     f"PNG_OUTPUT={fx['png']}",
                     "--output",
                     str(fx["prompt_orchestrator"]),
+                ],
+            ),
+            (
+                "prompt-page-breakpoint",
+                fx["prompt_breakpoint"],
+                [
+                    py,
+                    str(SCRIPTS_DIR / "prompt_harness.py"),
+                    "--template",
+                    str(REFERENCES_DIR / "prompts/step4/tpl-page-breakpoint-orchestrator.md"),
+                    "--var",
+                    "PAGE_NUM=3",
+                    "--var",
+                    "TOTAL_PAGES=8",
+                    "--var",
+                    f"AUDIT_REQUEST_PATH={fx['audit_request']}",
+                    "--var",
+                    "START_STAGE=html",
+                    "--var",
+                    "END_STAGE=review",
+                    "--var",
+                    f"PLANNING_PROMPT_PATH={fx['prompt_planning']}",
+                    "--var",
+                    f"HTML_PROMPT_PATH={fx['prompt_html']}",
+                    "--var",
+                    f"REVIEW_PROMPT_PATH={fx['prompt_review']}",
+                    "--var",
+                    f"PLANNING_OUTPUT={fx['planning']}",
+                    "--var",
+                    f"SLIDE_OUTPUT={fx['slide']}",
+                    "--var",
+                    f"PNG_OUTPUT={fx['png']}",
+                    "--var",
+                    "TARGET_ASSET_PATH=none",
+                    "--var",
+                    "RUNTIME_CONTEXT_PATHS=none",
+                    "--var",
+                    "USER_AUDIT_REQUEST=把主标题收敛一点，并重点检查右侧图卡和指标层级",
+                    "--output",
+                    str(fx["prompt_breakpoint"]),
                 ],
             ),
         ]
@@ -683,7 +797,7 @@ def run_smoke() -> SmokeResult:
                         ],
                         result,
                     )
-                    assert_max_bytes(label, rendered, 9000, result)
+                    assert_max_bytes(label, rendered, 11500, result)
                 if label == "prompt-style-phase1":
                     assert_contains(
                         label,
@@ -711,6 +825,44 @@ def run_smoke() -> SmokeResult:
                         ["# Page Visual Review & Fix Playbook -- 单页图审与 HTML 修复", "# Runtime Failure Modes"],
                         result,
                     )
+                if label == "prompt-page-audit-request":
+                    assert_contains(
+                        label,
+                        rendered,
+                        [
+                            "# Step 4 人工审计返工请求",
+                            "start_stage: html",
+                            "end_stage: review",
+                            "user_request: 把主标题收敛一点，并重点检查右侧图卡和指标层级",
+                        ],
+                        result,
+                    )
+                    write_text(fx["audit_request"], rendered)
+                if label == "prompt-page-breakpoint":
+                    assert_contains(
+                        label,
+                        rendered,
+                        [
+                            "# PagePatchAgent-3 断点返工调度指令",
+                            f"先读取：`{fx['audit_request']}`",
+                        ],
+                        result,
+                    )
+
+        audit_request_contract = run_cmd(
+            "contract-validator-page-audit-request",
+            [
+                py,
+                str(SCRIPTS_DIR / "contract_validator.py"),
+                "page-audit-request",
+                str(fx["audit_request"]),
+                "--base-dir",
+                str(tmp_dir),
+            ],
+            result,
+        )
+        if audit_request_contract.returncode == 0:
+            assert_contains("contract-validator-page-audit-request", audit_request_contract.stdout, ["OK"], result)
 
     return result
 

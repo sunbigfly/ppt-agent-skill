@@ -119,7 +119,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
 
 ```
 {{SUBAGENT_NAME}} = ResearchSynth
-{{MODEL}}         = SUBAGENT_MODEL
+{{MODEL}}           = SUBAGENT_MODEL
+{{THINKING_EFFORT}} = SUBAGENT_THINKING_EFFORT
 {{PROMPT_PATH}}   = OUTPUT_DIR/runtime/prompt-research-orchestrator.md
 ```
 
@@ -180,7 +181,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
 
 ```
 {{SUBAGENT_NAME}} = SourceSynth
-{{MODEL}}         = SUBAGENT_MODEL
+{{MODEL}}           = SUBAGENT_MODEL
+{{THINKING_EFFORT}} = SUBAGENT_THINKING_EFFORT
 {{PROMPT_PATH}}   = OUTPUT_DIR/runtime/prompt-source-orchestrator.md
 ```
 
@@ -238,7 +240,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
 
 ```
 {{SUBAGENT_NAME}} = Outline
-{{MODEL}}         = SUBAGENT_MODEL
+{{MODEL}}           = SUBAGENT_MODEL
+{{THINKING_EFFORT}} = SUBAGENT_THINKING_EFFORT
 {{PROMPT_PATH}}   = OUTPUT_DIR/runtime/prompt-outline-orchestrator.md
 ```
 
@@ -297,7 +300,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
 
 ```
 {{SUBAGENT_NAME}} = Style
-{{MODEL}}         = SUBAGENT_MODEL
+{{MODEL}}           = SUBAGENT_MODEL
+{{THINKING_EFFORT}} = SUBAGENT_THINKING_EFFORT
 {{PROMPT_PATH}}   = OUTPUT_DIR/runtime/prompt-style-orchestrator.md
 ```
 
@@ -317,6 +321,7 @@ python3 SKILL_DIR/scripts/contract_validator.py style OUTPUT_DIR/style.json
 
 > **统一执行后端**：所有环境统一使用 orchestrator 渐进式披露。
 > subagent 内部自主按阶段读取 prompt，主 agent 只负责生成 prompt + 创建 subagent + 回收校验。
+> 若用户开启人工审计断点，则主 agent 仍先生成同一套 runtime prompt，再按需要创建阶段型 PageAgent 或 `PagePatchAgent-N`。
 
 ---
 
@@ -405,7 +410,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
 回查《Subagent 操作手册》取出调用模板，替换变量后**显式输出到对话**再执行：
 ```
 {{SUBAGENT_NAME}} = PageAgent-N
-{{MODEL}}         = SUBAGENT_MODEL
+{{MODEL}}           = SUBAGENT_MODEL
+{{THINKING_EFFORT}} = SUBAGENT_THINKING_EFFORT
 {{PROMPT_PATH}}   = OUTPUT_DIR/runtime/prompt-page-orchestrator-N.md
 ```
 > subagent 是完全隔离的：它只能看到 orchestrator prompt 的内容，内部按 orchestrator 指示自主渐进读取各阶段 prompt。
@@ -415,6 +421,81 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
 > 2. 自主读 html prompt -> 完成设计稿 -> 产出 slide-N.html
 > 3. 自主读 review prompt -> 截图审查修复（保底 2 轮）-> 产出 slide-N.png
 > 4. P0+P1 清零 + visual_qa 通过后 FINALIZE
+
+---
+
+### 4.3A 可选：人工审计断点 / Step 4 外挂返工
+
+当 Step 0 已记录 `manual_audit_mode != off`，或用户在运行中明确要求“看某张图 / 用 runtime / 从某节点重开”时，主 agent 应切到这一支。
+
+**适用场景：**
+
+- 用户想先看 `planningN.json` 再决定是否继续
+- 用户想看当前 `slide-N.html` 或最终 `slide-N.png`
+- 用户点名某张 `review/roundX/slide-N.png`
+- 用户给出追加 prompt，要求从 `planning` / `html` / `review` 某个节点重新执行
+
+**1. 生成外挂 orchestrator prompt：**
+
+```bash
+# 1a. 先生成返工请求并校验
+python3 SKILL_DIR/scripts/prompt_harness.py \
+  --template SKILL_DIR/references/prompts/step4/tpl-page-audit-request.md \
+  --var PAGE_NUM=N \
+  --var START_STAGE=html \
+  --var END_STAGE=review \
+  --var USER_AUDIT_REQUEST="用户追加的图审或改稿要求（压成一行）" \
+  --var TARGET_ASSET_PATH=OUTPUT_DIR/review/round2/slide-N.png \
+  --var RUNTIME_CONTEXT_PATHS="OUTPUT_DIR/runtime/prompt-page-html-N.md; OUTPUT_DIR/runtime/prompt-page-review-N.md" \
+  --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
+  --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
+  --var PNG_OUTPUT=OUTPUT_DIR/png/slide-N.png \
+  --output OUTPUT_DIR/runtime/page-audit-request-N.txt
+
+python3 SKILL_DIR/scripts/contract_validator.py page-audit-request OUTPUT_DIR/runtime/page-audit-request-N.txt --base-dir OUTPUT_DIR
+
+# 1b. 再生成外挂 orchestrator prompt
+python3 SKILL_DIR/scripts/prompt_harness.py \
+  --template SKILL_DIR/references/prompts/step4/tpl-page-breakpoint-orchestrator.md \
+  --var PAGE_NUM=N \
+  --var TOTAL_PAGES=TOTAL \
+  --var AUDIT_REQUEST_PATH=OUTPUT_DIR/runtime/page-audit-request-N.txt \
+  --var START_STAGE=html \
+  --var END_STAGE=review \
+  --var PLANNING_PROMPT_PATH=OUTPUT_DIR/runtime/prompt-page-planning-N.md \
+  --var HTML_PROMPT_PATH=OUTPUT_DIR/runtime/prompt-page-html-N.md \
+  --var REVIEW_PROMPT_PATH=OUTPUT_DIR/runtime/prompt-page-review-N.md \
+  --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
+  --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
+  --var PNG_OUTPUT=OUTPUT_DIR/png/slide-N.png \
+  --var TARGET_ASSET_PATH=OUTPUT_DIR/review/round2/slide-N.png \
+  --var RUNTIME_CONTEXT_PATHS="OUTPUT_DIR/runtime/prompt-page-html-N.md; OUTPUT_DIR/runtime/prompt-page-review-N.md" \
+  --var USER_AUDIT_REQUEST="用户追加的图审或改稿要求" \
+  --output OUTPUT_DIR/runtime/prompt-page-breakpoint-N.md
+```
+
+> 若当前没有点名图片或额外 runtime 文件，将 `TARGET_ASSET_PATH` 或 `RUNTIME_CONTEXT_PATHS` 填成 `none`。
+
+**2. 创建 `PagePatchAgent-N` 并执行：**
+
+```
+{{SUBAGENT_NAME}} = PagePatchAgent-N
+{{MODEL}}           = SUBAGENT_MODEL
+{{THINKING_EFFORT}} = SUBAGENT_THINKING_EFFORT
+{{PROMPT_PATH}}   = OUTPUT_DIR/runtime/prompt-page-breakpoint-N.md
+```
+
+**3. 起点规则：**
+
+- `START_STAGE=planning`：重做策划，并继续跑 `html -> review`
+- `START_STAGE=html`：复用现有 planning，重做 `html -> review`
+- `START_STAGE=review`：复用现有 planning + html，直接进图审修复并重新截图
+
+**4. 终点规则：**
+
+- `END_STAGE=planning`：只产出更新后的 `planningN.json`，用于中间断点确认
+- `END_STAGE=html`：产出更新后的 `slide-N.html`，用于中间断点确认
+- `END_STAGE=review`：产出更新后的 `slide-N.png`，随后仍要进入 4.4 的整页终检
 
 ---
 
@@ -572,7 +653,7 @@ python3 SKILL_DIR/scripts/milestone_check.py <stage> --output-dir OUTPUT_DIR
 
 ## 合同校验器 contract-type 列表
 
-`interview` / `requirements-interview` / `search` / `search-brief` / `source-brief` / `outline` / `style` / `images` / `page-review` / `delivery-manifest`
+`interview` / `requirements-interview` / `search` / `search-brief` / `source-brief` / `outline` / `style` / `images` / `page-review` / `page-audit-request` / `delivery-manifest`
 
 通用格式：
 

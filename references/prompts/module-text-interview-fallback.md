@@ -1,12 +1,11 @@
 # Text Fallback Mode -- 结构化文本采访单
 
-# Text Fallback Mode -- 结构化文本采访单
-
 ## 强制执行纪律
 
-1. **极致静默**：直接抛出下方的文本采访单，严禁附加寒暄、前言或“为什么要问”的解释。
-2. **严禁退化**：不支持 UI 不等于退化成填空题。必须完整输出带备选项的结构化清单（禁止变成单行密集的 `场景=；受众=...`）。
-3. 若用户直接回复“全部按默认，用 research”，主 agent 必须按默认值归纳并继续推进，不得因此卡死。
+1. **必须一字不漏复制**：你在发出采访问卷时，**必须且只能 100% 原样复制**下方【固定输出格式】代码块内的 Markdown 文本！
+2. **严禁自作聪明的删减和总结**：绝不允许你基于后文的业务逻辑自己编造采访问卷！绝不允许把带有【A. xxx】【B. xxx】的选项列表吃掉退化成分组标题，必须每一行都原封不动吐给用户，否则用户将不知道该选什么。
+3. **极致静默**：严禁附加寒暄、前言或“为什么要问”的解释。
+4. 若用户直接回复“全部按默认，用 research”，主 agent 必须按默认值归纳并继续推进，不得因此卡死。
 
 ## 固定输出格式
 
@@ -21,8 +20,8 @@
 **B. 内容与边界**
 - 期望页数：【A. 5-10页(微型/短汇报)】 【B. 10-20页(标准)】 【C. 20-30页及以上(宽幅深度盘点)】 【D. 让AI凭内容自动决断】
 - 密度：【A. 极简呼吸感(字少图大，Apple-Style)】 【B. 均衡图文(主次分明)】 【C. 极高密度干货(麦肯锡式详实)】
-- 资料：【A. Research(主主代理全网扩写做发散)】 【B. 严格闭卷(不发散，只用现有文字)】
-- 核心主张与红线：【自由补充。例如：全篇必须打透的唯一主张是“我们比竞品快三倍”；绝对禁止提xx公司的名字】
+- 资料：【A. Research(全网检索扩写并做发散)】 【B. 严格闭卷(绝不发散，仅限用户现有文字)】
+- 核心主张与红线：【自由补充，例如：主张必须是我们最快，禁止提xx竞品名字】
 
 **C. 视觉与资产策略**
 - 风格：【A. 蓝灰数据向极简商务】 【B. 赛博/暗色流光科技极客】 【C. 活泼多色的动感/流行风】 【D. 让AI凭主题自决定】 【E. 其他:___】
@@ -31,7 +30,13 @@
 - 品牌定制：【自由补充，例如：主色设为 #FF0000】
 
 **D. 架构控制**
-- 模型：【A. 子代理模型同主代理】 【B. 指定更强/更快的模型:___】
+- 模型：【A. 默认(继承主代理)】 【B. 指定更强/更快的模型:___】
+- 思考深度/推理等级：【A. 默认(中等)】 【B. 低(快速逻辑)】 【C. 高(烧脑深度思考)】
+
+**E. 人工审计与断点**
+- 是否参与中间审计：【A. 不参与，自动跑完全程】 【B. 只看关键节点(如大纲/风格/最终图审)】 【C. 细颗粒度断点(可在单页 planning/html/review 介入)】
+- 重点介入节点：【A. 只看最终图审图】 【B. 看 HTML + 图审】 【C. planning / HTML / 图审都可介入】 【D. 其他:___】
+- 审计材料范围：【A. 只看主 agent 摘要】 【B. 可直接看最终 PNG】 【C. 可直接点名 runtime 文件 / HTML / 某轮审查图】
 ```
 
 ## 归纳后的问答落点
@@ -46,6 +51,11 @@ brand_constraints -> brand
 language_mode -> language
 imagery_strategy -> imagery
 material_strategy -> material_strategy
+subagent_model_strategy -> subagent_model_strategy
+subagent_thinking_effort -> subagent_thinking_effort
+manual_audit_mode -> manual_audit_mode
+manual_audit_scope -> manual_audit_scope
+manual_audit_assets -> manual_audit_assets
 ```
 
 若用户回复“全部按默认，用 research”，至少按以下默认落点写入：
@@ -57,4 +67,8 @@ visual_style: 自动匹配
 language_mode: 中文
 imagery_strategy: decorate
 subagent_model_strategy: 继承主代理
+subagent_thinking_effort: 中等
+manual_audit_mode: off
+manual_audit_scope: final_review_only
+manual_audit_assets: summary_only
 ```

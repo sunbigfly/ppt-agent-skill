@@ -22,10 +22,11 @@ description: 专业 PPT 演示文稿全流程 AI 生成助手。模拟顶级 PPT
 - **守门规则（Gate）**：进入下个 Step 前，前序 Gate 必须通过；当前步命令执行完毕且 Gate `exit=0` 后才能标记为 `completed`。
 - 失败时只允许两种动作：`RETRY_CURRENT_STEP` 或 回退 `ROLLBACK→StepID`。**严禁"跳到后续步骤试试看"**。
 - `WAIT_USER` / `WAIT_AGENT` 是硬等待点；未收到输入/FINALIZE 前，**禁止执行后续步骤**。
+- **人工审计断点**：是否开启、介入哪些节点、可看哪些材料，必须在 Step 0 采访时写入 `requirements-interview.txt`。断点只能挂在既有主链 Step 内，且只允许主 agent 控制；subagent 不得自行向用户发问。
 
 ### 2.2 Subagent 强制调度（核心约束）
 
-**通用生命周期**：`create(--model SUBAGENT_MODEL) → RUN(prompt路径) → STATUS… → FINALIZE → close`；完成即关，不复用。Step 4 每页一个 PageAgent-N，通过 orchestrator prompt 内部自主渐进完成 Planning → HTML → Review，整页 FINALIZE 后立刻关闭。创建时**必须**显式传 `--model SUBAGENT_MODEL`，禁止省略。`SUBAGENT_MODEL` 由用户在 Step 0 采访时指定（详见 3.1.0 及 6.2）。
+**通用生命周期**：`create(--model SUBAGENT_MODEL) → RUN(prompt路径) → STATUS… → FINALIZE → close`；完成即关，不复用。Step 4 默认每页一个 PageAgent-N；若用户开启人工审计或要求返工，则由主 agent 创建阶段型 PageAgent 或 `PagePatchAgent-N`。创建时**必须**显式传 `--model SUBAGENT_MODEL`，禁止省略。`SUBAGENT_MODEL` 由用户在 Step 0 采访时指定（详见 3.1.0 及 6.2）。
 
 **上下文隔离（强制）**：无论 CLI 环境默认是否让 subagent 继承主 agent 上下文，本 skill 要求所有 subagent 必须以**隔离模式**运行——subagent 唯一可见的上下文是主 agent 通过 prompt 文件显式传递的内容。如果 CLI 支持隔离参数（如 `--no-context`、沙箱模式等），必须在《Subagent 操作手册》中记录并在调用模板中包含。主 agent 的对话历史、SKILL.md 内容、环境变量等**不应该**泄露给 subagent。
 
@@ -43,6 +44,7 @@ description: 专业 PPT 演示文稿全流程 AI 生成助手。模拟顶级 PPT
 - 上表中每个 Step 的产物**只允许对应 subagent 生成**，主 agent 内联生产任何产物 = 合同违规
 - 即使 subagent 失败，主 agent 也只能重建 subagent 重跑，不能自己"补写"产物
 - 图片模式 `generate` 且用户需要文生图时，额外创建 `ImageGen` 子代理；PageAgent 不承担文生图
+- 若用户在人工审计断点提出改单，主 agent 也**必须**通过阶段型 PageAgent 或 `PagePatchAgent-N` 返工；严禁主 agent 直接手改正式产物
 
 **自适应调用协议（每个业务节点强制执行）**：
 
@@ -109,12 +111,12 @@ subagent FINALIZE 前自审；主 agent 回收后再跑同一 validator 复检�
 1. 先调用 `update_plan` 创建 canonical plan。
 2. 必须读取 `references/cli-cheatsheet.md` 建立对所有 CLI 接口的精确记忆。
 
-#### 3.1.0 模型感知与 Subagent 模型绑定（Model Perception）
-为了绝对保证内容质量不滑坡，主 agent 必须在开局时确认自己是谁，并在采访阶段确认 subagent 使用的模型：
+#### 3.1.0 模型与思考深度感知（Model & Thinking Effort Perception）
+为了绝对保证内容质量不滑坡，主 agent 必须在开局时确认自己是谁，并在采访阶段确认 subagent 使用的模型及思考等级：
 1. **强行识别当前主 agent 正在使用的大模型版本**（例如 Claude-3.5、Gemini-1.5 等，如果无法确认直接问用户）。
-2. 将其在心中显性固化为 `MAIN_MODEL` 全局变量，并在对话中输出 `## 模型感知结果`。
-3. **`SUBAGENT_MODEL` 绑定**：Step 0 采访阶段会向用户确认 subagent 使用的模型（详见 6.2）。用户回答后，将其显性固化为 `SUBAGENT_MODEL` 全局变量，并在 `## 模型感知结果` 中同步输出。若用户未明确指定，则 `SUBAGENT_MODEL` 默认等于 `MAIN_MODEL`。
-4. **全局防降格红线**：一旦确认 `SUBAGENT_MODEL`，在后续流程中创建任何 Subagent 时，必须强制携带该模型参数发起子系统（绝对禁止走默认回退配置）。
+2. 将其在心中显性固化为 `MAIN_MODEL` 全局变量，并在对话中输出 `## 模型感知结果`。同时也需探测当前环境 API/工具是否支持给模型传递"思考深度/推理努力(reasoning effort)"这一级选项。
+3. **`SUBAGENT_MODEL` 与 `SUBAGENT_THINKING_EFFORT` 绑定**：Step 0 采访阶段不仅会向用户确认 subagent 使用的模型，还会询问需要的**思考深度等级**（详见 6.2）。用户回答后，将其显性固化为 `SUBAGENT_MODEL` 和 `SUBAGENT_THINKING_EFFORT` 全局变量，并在 `## 模型感知结果` 中同步输出。
+4. **全局防降格红线**：一旦确认这两个变量，在后续流程中创建任何 Subagent 时，必须强制将其带入构建参数中（绝对禁止走默认回退配置）。
 
 #### 3.1.1 Subagent 操作手册生成
 环境中有多种执行工具，主 agent 必须为自己梳理规矩：
@@ -122,13 +124,13 @@ subagent FINALIZE 前自审；主 agent 回收后再跑同一 validator 复检�
 2. 检查这些工具是否支持模型重载参数（对应 3.1.0）。
 3. 整理出支持情况并输出到对话，标题固定为 `## Subagent 操作手册`，必须包含以下内容：
    - **工具名称**：当前环境可用的 subagent 创建工具
-   - **调用模板（必须含变量槽）**：一个可参数化的命令模板，包含 `{{SUBAGENT_NAME}}`、`{{PROMPT_PATH}}`、`{{MODEL}}` 三个槽位（`{{MODEL}}` 填 `SUBAGENT_MODEL` 的值）
+   - **调用模板（必须含变量槽）**：一个可参数化的命令模板，包含 `{{SUBAGENT_NAME}}`、`{{PROMPT_PATH}}`、`{{MODEL}}` 以及支持深度思考情况下的 `{{THINKING_EFFORT}}` 等四个槽位。
    - **示例调用**：用具体值填充槽位的实例
 
-   调用模板示例（主 agent 必须根据实际环境生成类似格式，`{{MODEL}}` = `SUBAGENT_MODEL`）：
+   调用模板示例（主 agent 必须根据实际环境生成类似格式，`{{MODEL}}` = `SUBAGENT_MODEL`，`{{THINKING_EFFORT}}` = `SUBAGENT_THINKING_EFFORT`）：
    ```
-   # 模板（槽位用 {{}} 标记，MODEL 取自用户在采访阶段指定的 SUBAGENT_MODEL）
-   <tool> --model {{MODEL}} --message "Read {{PROMPT_PATH}} and execute all instructions" --name {{SUBAGENT_NAME}}
+   # 模板（槽位用 {{}} 标记，MODEL 取自 SUBAGENT_MODEL，THINKING_EFFORT 取自 SUBAGENT_THINKING_EFFORT）
+   <tool> --model {{MODEL}} --reasoning-effort {{THINKING_EFFORT}} --message "Read {{PROMPT_PATH}} and execute all instructions" --name {{SUBAGENT_NAME}}
    ```
 
 4. 此后每个业务节点调用 subagent 时，必须回查此模板、替换变量、**显式输出组装后的完整命令到对话中**，然后执行。禁止“依据操作手册”这种含糊引用。
@@ -208,11 +210,14 @@ P2A.05 [可选] 回退 P2A.01 扩搜重跑
 P2A.06 关闭
 
 P2B.01 [如 pptx][WAIT_USER] 模式确认
-P2B.02 harness → phase1 + phase2 + orchestrator prompt
-P2B.03 创建 SourceSynth subagent（发 orchestrator，subagent 内部自主渐进：提炼 → 自审）
-P2B.04 [WAIT_AGENT] FINALIZE
-P2B.05 回收校验（source-brief.txt）
-P2B.06 关闭
+P2B.02 资料初读与方向提炼（梳理 3-5 个可能的陈述切入方向）
+P2B.03 [WAIT_USER] 强制展示方向并获取用户选择
+P2B.04 将用户选定方向写入 requirements-interview.txt
+P2B.05 harness → phase1 + phase2 + orchestrator prompt
+P2B.06 创建 SourceSynth subagent（发 orchestrator，subagent 内部自主渐进：提炼 → 自审）
+P2B.07 [WAIT_AGENT] FINALIZE
+P2B.08 回收校验（source-brief.txt）
+P2B.09 关闭
 
 P3.01  harness → phase1 + phase2 + orchestrator prompt
 P3.02  创建 Outline subagent（发 orchestrator，subagent 内部自主渐进：编写 → 自审+修复）
@@ -226,11 +231,11 @@ P3.5.03 [WAIT_AGENT] FINALIZE
 P3.5.04 回收校验 style.json
 P3.5.05 关闭
 
-P4.NN.01 harness 生成三份阶段 prompt + orchestrator prompt
-P4.NN.02 创建 PageAgent-NN
-P4.NN.03 RUN orchestrator prompt → PageAgent 内部自主渐进完成 Planning→HTML→Review
+P4.NN.01 harness 生成 Step 4 runtime prompt
+P4.NN.02 创建当前页 subagent（自动直通：PageAgent-NN；人工审计/返工：阶段型 PageAgent 或 PagePatchAgent-NN）
+P4.NN.03 [可选][WAIT_USER] 主 agent 在断点展示材料并收集用户意见
 P4.NN.04 回收 FINALIZE → 整页终检（产物校验 + visual_qa + 主 agent 看图）
-P4.NN.05 关闭 PageAgent-NN
+P4.NN.05 关闭当前页 subagent
 （所有页并行推进）
 
 P5.01  生成 preview.html
@@ -293,9 +298,10 @@ P5.04  写入 delivery-manifest.json
 - **高效推进**：采访直接收集所需字段信息，不生成解释性分析与背景描述。
 - **默认执行方式**：优先按环境能力生成使用结构化采访 UI（`tpl-interview-structured-ui.md`），若不支持则用格式清晰且附带选项的文本问答（`tpl-interview-text-fallback.md`）。
 - **结构化输出约束**：通过提示向用户提供明确的备选项。最终收集的字段组合必须高度结构化、数据详实，能直接输出至 `requirements-interview.txt` 并 100% 被下游验证器（Gate）与子系统（Subagent）解析消费，无需推测与加工。
-- **必须覆盖但允许精简（如果已知）的维度**：场景、受众、核心传达目标、期望页数与密度、风格倾向、品牌规范、配图策略、资料使用范围。
-- **subagent 模型选择（必问）**：直截了当让用户选「后续子代理使用什么模型？」（列出如 `o4-mini`、`gemini-pro` 等）。选出后固化为 `SUBAGENT_MODEL` 全局变量。若不关心，则 `SUBAGENT_MODEL = MAIN_MODEL`。
-- 只有所有重要选项收集齐并固化入 `requirements-interview.txt`，才能进入 Step 1。
+- **必须覆盖但允许精简（如果已知）的维度**：场景、受众、核心传达目标、期望页数与密度、风格倾向、品牌规范、配图策略、资料使用范围，以及是否参与中间人工审计。
+- **subagent 模型与思考深度（必问）**：直截了当让用户选「后续子系统使用什么模型，以及需要何种等级的思考深度？」（如低/中/高，或者普通/深度思考，视当前模型生态而定）。选出后分别固化在 `SUBAGENT_MODEL` 和 `SUBAGENT_THINKING_EFFORT` 全局变量。如果用户不关心，可以默认 `SUBAGENT_MODEL = MAIN_MODEL` 并使用中等思考等级。
+- **人工审计参与方式（必问）**：至少固化 `manual_audit_mode`、`manual_audit_scope`、`manual_audit_assets` 这 3 个字段；具体选项与提问形式放在采访模板里维护，不在 `SKILL.md` 展开。
+- 只有所有重要选项收集齐并固化入 `requirements-interview.txt`（必须包含模型、思考深度和人工审计参数），才能进入 Step 1。
 
 ### 6.3 Step 1 分支确立
 
@@ -323,13 +329,15 @@ P5.04  写入 delivery-manifest.json
 
 ### 6.5 Step 2B 本地资料压缩（非 Research 分支）
 
-用户丢来的一堆资料必须先处理好再跑大纲。**此步同样走 subagent 模式**（SourceSynth subagent），禁止主 agent 内联执行内容生产。
+用户丢来的一堆资料必须先处理好再跑大纲。**此步同样走 subagent 模式**（SourceSynth subagent），但为了避免黑盒决定方向且保证方向贴合业务，必须在此阶段引入用户决策。禁止主 agent 内联执行正式内容生产，但允许浅度摸底。
 
-1. 主 agent 通过 harness 生成 SourceSynth prompt（命令见 cheatsheet Step 2B）。
-2. 按《Subagent 操作手册》创建 SourceSynth subagent（必须传 `--model SUBAGENT_MODEL`）。
-3. SourceSynth 负责：**多文件降维**（doc/excel/pdf/代码 → 纯文本）、**前置理解**（主题粗建构）、整合输出 `source-brief.txt`。
-4. 主 agent 回收 FINALIZE 后执行 Gate 校验。
-5. **特例**：若用户直接传了 `.pptx`，主 agent 须在创建 subagent **前**强制询问期望的处理模式（仅美化排版 / 彻底重构大纲 / 美化排版并重构内容）。
+1. **[特例] pptx 模式确认**：若用户直接传了 `.pptx`，主 agent 须**最先**强制询问期望的处理模式（仅美化排版 / 彻底重构大纲 / 美化排版并重构内容）。
+2. **[防黑盒] 资料初读与方向提炼**：主 agent （或调用其他轻量解析工具）必须对用户现有的资料做一次快速摸底通读，提炼出 3-5 个可能的**PPT 核心陈述方向/切入视角**（例如：以技术机制为侧重点 vs 以商业价值为侧重点）。
+3. **强制确认方向**：通过 `[WAIT_USER]` 强制向用户提问："基于您提供的资料，我梳理了以下几个讲述方向，您倾向哪种或有其他补充？"。收到用户明确答复后，将此业务方向追加写入 `requirements-interview.txt` 中。
+4. 主 agent 通过 harness 生成 SourceSynth prompt（命令见 cheatsheet Step 2B）。
+5. 按《Subagent 操作手册》创建 SourceSynth subagent（必须传 `--model SUBAGENT_MODEL`）。
+6. SourceSynth 负责：**多文件降维**（doc/excel/pdf/代码 → 纯文本）、**前置理解**（顺着文件 `requirements-interview.txt` 里的强制方向提取主题）、整合输出 `source-brief.txt`。
+7. 主 agent 回收 FINALIZE 后执行 Gate 校验。
 
 ### 6.6 Step 3 大纲构建（内部闭环）
 
@@ -343,18 +351,18 @@ P5.04  写入 delivery-manifest.json
 
 为防止大模型在一次 prompt 中同时兼顾排版、图文推演与 HTML 编码导致「注意力塌陷」，本阶段每个单页的任务被拆散成三级 prompt（4A Planning -> 4B HTML -> 4C Review）。
 
-#### 执行流程
+#### 执行模式
 
-主 agent 为每页**依次**生成三份阶段 prompt 文件 + 一份**轻量 orchestrator prompt**（只含路径和执行协议，不含任何 playbook/principles 正文）。主 agent 只向 PageAgent-N 发送 orchestrator prompt，subagent 内部按 orchestrator 指示**自主渐进式读取**各阶段 prompt：
+Step 4 只保留两种模式：
 
-1. 读取 planning prompt -> 产出 `planningN.json`（对应 4A）
-2. 完成后自主读取 html prompt -> 落地 `slide-N.html`（对应 4B）
-3. 完成后自主读取 review prompt -> 截图审查修复（保底 2 轮）-> 产出 `slide-N.png`（对应 4C）
-4. P0+P1 清零 + visual_qa 通过后发出 `FINALIZE`
+1. **自动直通**：主 agent 生成标准 orchestrator prompt，PageAgent 一次跑完 Planning → HTML → Review。
+2. **人工审计**：若 `manual_audit_mode != off`，主 agent 可以在 `planning`、`html`、`review` 节点挂断点，展示最少够用的材料，等待用户意见后再继续。
 
-- **上下文隔离**：subagent 在 Planning 阶段时不会看到 Review 的 failure modes 和 HTML 的实现细节，避免注意力分散
-- **子代理内部自检**替代主 agent 细粒度阶段间 Gate；主 agent 仅在回收 FINALIZE 后做**整页终检**（`planning_validator` + 三件套存在性 + `visual_qa` + 亲自看图）
-- 状态真源是文件产物和 Gate，不依赖 session 状态
+#### 返工原则
+
+- 用户在断点提出改单时，主 agent **只能**通过阶段型 PageAgent 或 `PagePatchAgent-N` 返工，不能自己改正式产物。
+- 返工起点只允许是 `planning` / `html` / `review` 三选一；从哪个节点重开，由主 agent 按用户要求决定。
+- 断点材料、外挂 orchestrator 组装方式、以及 `PagePatchAgent-N` 的调用模板，都放在 `cli-cheatsheet.md` 的 Step 4 中维护。
 
 #### 共通规则
 
@@ -381,6 +389,8 @@ P5.04  写入 delivery-manifest.json
 
 **第二步：并行重跑** — 收集完毕后，一次性并行启动所有失败页：清三件套及 review 图片残留 → 从 `P4.NN.01` 开始重跑（先生成 prompt，再创建 PageAgent，随后 RUN orchestrator）。
 
+若当前页正处于人工审计模式，主 agent 也可以根据用户要求，不走整页从头重跑，而是显式改用 `PagePatchAgent-N` 从 `planning/html/review` 任一指定节点重开；但最终放行标准仍与完整 Step 4 完全一致。
+
 单页连续 3 次失败 → 标记 `BLOCKED_PAGE_N`，先跳过推进其余页，最后集中处理。
 
 **BLOCKED 页终态处理**：所有非 BLOCKED 页完成后，主 agent 必须：
@@ -406,5 +416,6 @@ contract_validator.py requirements-interview ...             # P0/P1
 
 3. 从下一未完成 step 继续；前序 Gate 失败则回退重做
 4. Step 4：读 `outline.txt` 确认总页数 → 侦查所有页三件套 + `planning_validator` + `visual_qa` → 并行重跑失败页；自动项通过后，主 agent 仍需重新看图确认（旧 session 全部失效）
+5. 若 `requirements-interview.txt` 中记录了人工审计开启，恢复到 Step 4 时还必须把最近可用的 runtime prompt、最终 PNG 和 `review/roundX` 存档一并纳入断点材料，再决定继续直通还是走 `PagePatchAgent-N`
 
 **禁止**：依赖旧 session、跳过侦查、串行逐页处理、恢复时新建 RUN_ID（除非用户要求全新开始）。

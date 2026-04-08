@@ -65,6 +65,10 @@
    - 证明你不仅是严谨的码农，更是狂热的前卫排印大师！
 9. **每个 planning card 都必须在 HTML 中有对应渲染根节点**，并为根节点补上 `data-card-id="<planning.card_id>"` 便于 review 对账；如果某卡含 `chart.chart_type`，渲染结果必须与该类型匹配。
 10. 将完整 HTML 写入 `{{SLIDE_OUTPUT}}`
+    > **🔴 绝对红线警告 🔴**
+    > `{{SLIDE_OUTPUT}}` 必须是 100% 纯净的 HTML 代码！
+    > 绝对禁止将上面的“执行摘要”（第 5 步）、“自检过程”（第 8 步）、“规划意图说明”、或任何与实际页面渲染无关的 Prompt 指令/思考过程写进 HTML 文档内部（包括 `<body>`、`<div>`、`<!--注释-->`）！
+    > 你只能将这些思考输出在对话界面或作为单独的日志，写入文件的 HTML 必须绝对干净，仅包含符合 Planning 骨架的设计元素。
 11. 完成信号：输出 `--- STAGE 2 COMPLETE: {{SLIDE_OUTPUT}} ---`，然后按外层 orchestrator 协议继续下一阶段
 
 ---

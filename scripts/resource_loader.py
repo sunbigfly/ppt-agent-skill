@@ -430,6 +430,19 @@ def main() -> int:
             print(f"ERROR: planning file not found: {planning_path}", file=sys.stderr)
             return 1
         result = resolve_resources(refs_dir, planning_path)
+        
+        # [增强版] 自动保存所提取组合资源的一份副本，用于审计与开发排查
+        try:
+            if planning_path.parent.name == "planning":
+                runtime_dir = planning_path.parent.parent / "runtime"
+                runtime_dir.mkdir(parents=True, exist_ok=True)
+                audit_file = runtime_dir / f"resolved_assets_{planning_path.stem}.md"
+            else:
+                audit_file = planning_path.parent / f"resolved_assets_{planning_path.stem}.md"
+            audit_file.write_text(result, encoding="utf-8")
+            print(f"[Audit] 自动保存所提取组合资源副本至: {audit_file}", file=sys.stderr)
+        except Exception:
+            pass
     elif args.mode == "images":
         images_dir = Path(args.images_dir)
         result = generate_image_inventory(images_dir)

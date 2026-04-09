@@ -228,6 +228,16 @@ def check_planning_example(result: CheckResult) -> None:
         "narrative_role",
         "page_goal",
         "visual_weight",
+        "density_label",
+        "density_reason",
+        "density_contract",
+        "max_cards",
+        "max_charts",
+        "min_body_font_px",
+        "max_lines_per_card",
+        "image_policy",
+        "decoration_budget",
+        "overflow_strategy",
         "layout_hint",
         "director_command",
         "decoration_hints",
@@ -360,6 +370,27 @@ def check_step0_interview_contract(result: CheckResult) -> None:
                 result.error(f"{format_rel(path)}: missing Step 0 token `{token}`")
 
 
+def check_visual_qa_contract(result: CheckResult) -> None:
+    cli_text = read_text(ROOT_DIR / "references/cli-cheatsheet.md")
+    required_snippets = [
+        "visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json --html OUTPUT_DIR/slides/slide-N.html",
+        "visual_qa.py OUTPUT_DIR/png --planning-dir OUTPUT_DIR/planning --html-dir OUTPUT_DIR/slides",
+    ]
+    for snippet in required_snippets:
+        if snippet not in cli_text:
+            result.error(f"references/cli-cheatsheet.md: missing visual_qa command `{snippet}`")
+
+    html_playbook = read_text(ROOT_DIR / "references/playbooks/step4/page-html-playbook.md")
+    html_prompt = read_text(ROOT_DIR / "references/prompts/step4/tpl-page-html.md")
+    for path_label, text in (
+        ("references/playbooks/step4/page-html-playbook.md", html_playbook),
+        ("references/prompts/step4/tpl-page-html.md", html_prompt),
+    ):
+        for token in ("data-decoration-layer", 'aria-hidden="true"'):
+            if token not in text:
+                result.error(f"{path_label}: missing decoration contract token `{token}`")
+
+
 def run_all_checks() -> CheckResult:
     result = CheckResult()
     check_prompt_harness_coverage(result)
@@ -369,6 +400,7 @@ def run_all_checks() -> CheckResult:
     check_truth_source_docs(result)
     check_resource_route_docs(result)
     check_step0_interview_contract(result)
+    check_visual_qa_contract(result)
     return result
 
 

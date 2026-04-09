@@ -141,7 +141,7 @@ python3 scripts/smoke_skill.py
 - 非末阶段 phase1 模板是否错误发送最终 `FINALIZE`
 - Step 4 文档是否混入已废弃的旧别名
 - Step 4 planning 示例 JSON 是否真能通过 `planning_validator.py`
-- Step 4 的 planning 示例、`resource_loader.py`、`prompt_harness.py` 主链是否还能最小串通（`smoke_skill.py`）
+- Step 3 的 `density_bias` 大纲合同、Step 4 的 `density_label / density_contract` 示例、`visual_qa.py` 双层断言、`resource_loader.py`、`prompt_harness.py` 主链是否还能最小串通（`smoke_skill.py`）
 
 ## 维护规则
 

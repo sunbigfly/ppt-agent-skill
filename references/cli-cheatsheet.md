@@ -362,6 +362,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var PLANNING_RUNTIME_COPY_PATH=OUTPUT_DIR/runtime/page-planning-output-N.json \
   --var PLANNING_VALIDATOR_REPORT_PATH=OUTPUT_DIR/runtime/page-planning-validator-N.json \
   --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
+  --var SUBAGENT_LOG_PATH=OUTPUT_DIR/runtime/page-agent-N.log \
+  --var SUBAGENT_NAME=PageAgent-N \
   --var SKILL_DIR='$SKILL_DIR' \
   --var REFS_DIR='$SKILL_DIR/references' \
   --inject-file PRINCIPLES_CHEATSHEET=SKILL_DIR/references/principles/design-principles-cheatsheet.md \
@@ -383,6 +385,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var HTML_RESOLVE_PATH=OUTPUT_DIR/runtime/page-html-resolve-N.md \
   --var HTML_RUNTIME_COPY_PATH=OUTPUT_DIR/runtime/page-html-output-N.html \
   --var STYLE_PATH=OUTPUT_DIR/style.json \
+  --var SUBAGENT_LOG_PATH=OUTPUT_DIR/runtime/page-agent-N.log \
+  --var SUBAGENT_NAME=PageAgent-N \
   --var SKILL_DIR='$SKILL_DIR' \
   --var REFS_DIR='$SKILL_DIR/references' \
   --inject-file PLAYBOOK=SKILL_DIR/references/playbooks/step4/page-html-playbook.md \
@@ -403,6 +407,8 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var REVIEW_RUNTIME_PNG_PATH=OUTPUT_DIR/runtime/page-review-output-N.png \
   --var VISUAL_QA_REPORT_PATH=OUTPUT_DIR/runtime/page-review-qa-N.txt \
   --var STYLE_PATH=OUTPUT_DIR/style.json \
+  --var SUBAGENT_LOG_PATH=OUTPUT_DIR/runtime/page-agent-N.log \
+  --var SUBAGENT_NAME=PageAgent-N \
   --var SKILL_DIR='$SKILL_DIR' \
   --inject-file PRINCIPLES_CHEATSHEET=SKILL_DIR/references/principles/design-principles-cheatsheet.md \
   --inject-file PLAYBOOK=SKILL_DIR/references/playbooks/step4/page-review-playbook.md \
@@ -425,6 +431,9 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
   --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
   --var PNG_OUTPUT=OUTPUT_DIR/png/slide-N.png \
+  --var SUBAGENT_LOG_PATH=OUTPUT_DIR/runtime/page-agent-N.log \
+  --var SUBAGENT_NAME=PageAgent-N \
+  --var SKILL_DIR='$SKILL_DIR' \
   --output OUTPUT_DIR/runtime/prompt-page-orchestrator-N.md
 ```
 
@@ -493,6 +502,9 @@ python3 SKILL_DIR/scripts/prompt_harness.py \
   --var PLANNING_OUTPUT=OUTPUT_DIR/planning/planningN.json \
   --var SLIDE_OUTPUT=OUTPUT_DIR/slides/slide-N.html \
   --var PNG_OUTPUT=OUTPUT_DIR/png/slide-N.png \
+  --var SUBAGENT_LOG_PATH=OUTPUT_DIR/runtime/page-patch-agent-N.log \
+  --var SUBAGENT_NAME=PagePatchAgent-N \
+  --var SKILL_DIR='$SKILL_DIR' \
   --var TARGET_ASSET_PATH=OUTPUT_DIR/review/round2/slide-N.png \
   --var RUNTIME_CONTEXT_PATHS="OUTPUT_DIR/runtime/prompt-page-html-N.md; OUTPUT_DIR/runtime/prompt-page-review-N.md" \
   --var USER_AUDIT_REQUEST="用户追加的图审或改稿要求" \
@@ -538,7 +550,7 @@ test -s OUTPUT_DIR/png/slide-N.png
 **第 2 步：自动化视觉断言（第一道过滤器）**
 
 ```bash
-python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json
+python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json --html OUTPUT_DIR/slides/slide-N.html
 # exit=1 -> 致命缺陷，直接重跑
 # exit=2 -> 品质警告，第 3 步看图时重点关注 WARN 项
 ```
@@ -547,7 +559,7 @@ python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUT
 
 > 这是整个质量体系的最终防线。`visual_qa.py` 只能抓硬伤，排版质量、内容完整性、视觉和谐度必须由主 agent 亲眼确认。
 
-1. 用 `view_file` 查看 `OUTPUT_DIR/png/slide-N.png`
+1. 用当前宿主可用的图像查看能力查看 `OUTPUT_DIR/png/slide-N.png`
 2. 重点关注：
    - 文字是否可读、排版是否正常（竖排单字列、文字溢出截断等）
    - 卡片内容是否完整（对照 subagent FINALIZE 中的 planning 卡片列表）
@@ -576,7 +588,7 @@ test -s OUTPUT_DIR/planning/planningN.json && \
 test -s OUTPUT_DIR/slides/slide-N.html && \
 test -s OUTPUT_DIR/png/slide-N.png && \
 python3 SKILL_DIR/scripts/planning_validator.py OUTPUT_DIR/planning --refs SKILL_DIR/references --page N && \
-python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json
+python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json --html OUTPUT_DIR/slides/slide-N.html
 # 任一 exit!=0 -> 加入失败页列表
 ```
 
@@ -697,13 +709,13 @@ python3 SKILL_DIR/scripts/contract_validator.py <contract-type> <target-file> [-
 单页：
 
 ```bash
-python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json
+python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png/slide-N.png --planning OUTPUT_DIR/planning/planningN.json --html OUTPUT_DIR/slides/slide-N.html
 ```
 
 批量：
 
 ```bash
-python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png --planning-dir OUTPUT_DIR/planning
+python3 SKILL_DIR/scripts/visual_qa.py OUTPUT_DIR/png --planning-dir OUTPUT_DIR/planning --html-dir OUTPUT_DIR/slides
 ```
 
 退出码：`0` = 全通过、`1` = FAIL（致命缺陷，必须重跑）、`2` = WARN（品质警告，看图复查）

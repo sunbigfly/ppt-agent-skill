@@ -8,6 +8,7 @@
 |------|------|--------|
 | `prompt_harness.py` | 模板变量填充，生成 subagent prompt | 主 agent |
 | `resource_loader.py` | 资源路由器（menu 菜单 / resolve 按需加载 / images 图片清单） | 主 agent + subagent |
+| `subagent_logger.py` | 记录 subagent 阶段命令的 stdout/stderr 与阶段注记到 runtime 日志 | subagent |
 
 ## 校验工具
 
@@ -17,7 +18,7 @@
 | `planning_validator.py` | Step 4 planning JSON 单页/全量验证 | subagent 自审 + 主 agent gate |
 | `milestone_check.py` | 按里程碑阶段验收 | 主 agent |
 | `check_skill.py` | 检查 markdown / prompt / validator / 资源之间的协议漂移 | skill 作者 / 维护者 |
-| `smoke_skill.py` | 跑 Step 4 的最小端到端 smoke test（validator + resource_loader + prompt_harness） | skill 作者 / 维护者 |
+| `smoke_skill.py` | 跑 Step 3/4 的最小端到端 smoke test（outline/planning validator + visual_qa + resource_loader + prompt_harness） | skill 作者 / 维护者 |
 
 说明：
 
@@ -25,7 +26,7 @@
 - `resource_loader.py` 的 `menu` / `resolve` 会跳过 `runtime-*` 文件；这些文件由主链定向注入
 - Step 4 现在会先用 `resource_loader.py menu --output ...` 生成 `runtime/page-planning-menu-N.md`，既给 planning 阶段读取，也方便维护时直接检查
 - `check_skill.py` 是维护期自检，不参与运行时调度；建议改完 `tpl` / `playbook` / `cli-cheatsheet` / Step 4 schema 示例后手动跑一次
-- `smoke_skill.py` 是维护期冒烟，不参与运行时调度；它会真实调用现有 CLI，验证 Step 0 双模板按能力裁剪、Step 4 最小主链、非 `content` 页 `page-templates/` 路由、以及关键资源型 prompt 注入还能接通
+- `smoke_skill.py` 是维护期冒烟，不参与运行时调度；它会真实调用现有 CLI，验证 Step 0 双模板按能力裁剪、Step 3 三种 `density_bias` 大纲合同、Step 4 五档 `density_label`、`visual_qa` 的 `planning + html` 双层断言、非 `content` 页 `page-templates/` 路由，以及关键资源型 prompt 注入还能接通
 
 ## 导出工具
 

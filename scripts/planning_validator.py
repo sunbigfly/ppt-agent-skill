@@ -28,7 +28,7 @@ from workflow_versions import (
 
 VALID_PAGE_TYPES = {"cover", "toc", "section", "content", "end"}
 VALID_NARRATIVE_ROLES = {
-    "opening", "orientation", "transition", "setup", "evidence", "comparison",
+    "cover", "toc", "section", "opening", "orientation", "transition", "setup", "evidence", "comparison",
     "framework", "process", "case", "quote", "breath", "close", "cta",
 }
 VALID_CARD_ROLES = {"anchor", "support", "context"}
@@ -47,6 +47,14 @@ VALID_LAYOUT_HINTS = {
     "hero-top", "mixed-grid", "l-shape", "t-shape", "waterfall", "free-cover",
     "free-section", "free-end", "toc-route",
 }
+VALID_DENSITY_BIASES = {"relaxed", "balanced", "ultra_dense"}
+VALID_DENSITY_LABELS = {"low", "mid_low", "medium", "high", "dashboard"}
+DENSITY_ORDER = {"low": 0, "mid_low": 1, "medium": 2, "high": 3, "dashboard": 4}
+VALID_IMAGE_POLICIES = {"flexible", "support_only", "decorate_only"}
+VALID_DECORATION_BUDGETS = {"generous", "medium", "low", "minimal"}
+VALID_OVERFLOW_STRATEGIES = {
+    "rebalance_layout", "tighten_budget", "table_or_microchart", "rollback_planning",
+}
 VALID_CHART_TYPES = {
     "kpi", "metric_row", "sparkline", "comparison_bar", "ring", "stacked_bar",
     "timeline", "funnel", "radar", "treemap", "waffle", "progress_bar", "rating",
@@ -55,6 +63,54 @@ VALID_IMAGE_USAGES = {
     "hero-background", "inline-illustration", "icon-accent", "data-visualization-bg",
 }
 VALID_IMAGE_PLACEMENTS = {"full-bleed", "left-half", "right-half", "card-bg", "inline"}
+
+DENSITY_DEFAULTS = {
+    "low": {
+        "max_cards": 2,
+        "max_charts": 1,
+        "min_body_font_px": 24,
+        "max_lines_per_card": 3,
+        "image_policy": "flexible",
+        "decoration_budget": "generous",
+        "overflow_strategy": "rebalance_layout",
+    },
+    "mid_low": {
+        "max_cards": 3,
+        "max_charts": 1,
+        "min_body_font_px": 20,
+        "max_lines_per_card": 4,
+        "image_policy": "flexible",
+        "decoration_budget": "medium",
+        "overflow_strategy": "rebalance_layout",
+    },
+    "medium": {
+        "max_cards": 4,
+        "max_charts": 2,
+        "min_body_font_px": 18,
+        "max_lines_per_card": 5,
+        "image_policy": "support_only",
+        "decoration_budget": "medium",
+        "overflow_strategy": "tighten_budget",
+    },
+    "high": {
+        "max_cards": 6,
+        "max_charts": 2,
+        "min_body_font_px": 16,
+        "max_lines_per_card": 4,
+        "image_policy": "support_only",
+        "decoration_budget": "low",
+        "overflow_strategy": "table_or_microchart",
+    },
+    "dashboard": {
+        "max_cards": 8,
+        "max_charts": 4,
+        "min_body_font_px": 14,
+        "max_lines_per_card": 3,
+        "image_policy": "decorate_only",
+        "decoration_budget": "minimal",
+        "overflow_strategy": "rollback_planning",
+    },
+}
 
 
 @dataclass
@@ -117,6 +173,17 @@ def natural_sort_key(path: Path) -> tuple[Any, ...]:
 
 def as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def normalize_density_label(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    lowered = value.strip().lower().replace("-", "_")
+    return lowered if lowered in VALID_DENSITY_LABELS else None
+
+
+def density_rank(label: str | None) -> int | None:
+    return DENSITY_ORDER.get(label) if label else None
 
 
 def normalize_page(page: dict[str, Any]) -> dict[str, Any]:
@@ -210,7 +277,14 @@ def resource_exists(refs_dir: Path, group: str, value: str) -> bool:
     return candidate_norm.exists()
 
 
-def validate_card(card: dict[str, Any], page_label: str, index: int, refs_dir: Path | None, result: ValidationResult) -> None:
+def validate_card(
+    card: dict[str, Any],
+    page: dict[str, Any],
+    page_label: str,
+    index: int,
+    refs_dir: Path | None,
+    result: ValidationResult,
+) -> None:
     card_label = f"{page_label} card[{index}]"
     card_id = card.get("card_id")
     if not isinstance(card_id, str) or not card_id.strip():
@@ -241,7 +315,15 @@ def validate_card(card: dict[str, Any], page_label: str, index: int, refs_dir: P
 
     budget = card.get("content_budget")
     if not isinstance(budget, dict):
-        result.warn(f"{card_label}: missing content_budget")
+        result.error(f"{card_label}: missing content_budget")
+    else:
+        max_lines = budget.get("body_max_lines")
+        density_contract = page.get("density_contract") if isinstance(page.get("density_contract"), dict) else {}
+        contract_max_lines = density_contract.get("max_lines_per_card")
+        if isinstance(max_lines, int) and isinstance(contract_max_lines, int) and max_lines > contract_max_lines:
+            result.error(
+                f"{card_label}: content_budget.body_max_lines={max_lines} exceeds density_contract.max_lines_per_card={contract_max_lines}"
+            )
 
     image = card.get("image")
     if not isinstance(image, dict):
@@ -261,6 +343,19 @@ def validate_card(card: dict[str, Any], page_label: str, index: int, refs_dir: P
             value = image.get(field_name)
             if value not in (None, "null"):
                 result.warn(f"{card_label}: image.needed=false so image.{field_name} should be null")
+
+    density_contract = page.get("density_contract") if isinstance(page.get("density_contract"), dict) else {}
+    image_policy = density_contract.get("image_policy")
+    if image_policy == "support_only":
+        if isinstance(image, dict) and image.get("needed") and image.get("usage") == "hero-background":
+            result.error(f"{card_label}: image_policy=support_only forbids hero-background images")
+        if card.get("card_type") == "image_hero":
+            result.error(f"{card_label}: image_policy=support_only forbids image_hero cards")
+    elif image_policy == "decorate_only":
+        if isinstance(image, dict) and image.get("needed"):
+            result.error(f"{card_label}: image_policy=decorate_only forbids image.needed=true")
+        if card.get("card_type") == "image_hero":
+            result.error(f"{card_label}: image_policy=decorate_only forbids image_hero cards")
 
     if refs_dir:
         resource_ref = card.get("resource_ref")
@@ -299,12 +394,93 @@ def validate_workflow_metadata(page: dict[str, Any], label: str, result: Validat
             result.warn(f"{label}: workflow_metadata.{field_name}={actual!r} != expected {expected!r}")
 
 
+def validate_density_contract(page: dict[str, Any], label: str, result: ValidationResult) -> tuple[str | None, dict[str, Any]]:
+    density_label = normalize_density_label(page.get("density_label"))
+    if density_label is None:
+        result.error(f"{label}: invalid density_label '{page.get('density_label')}'")
+
+    density_reason = page.get("density_reason")
+    if not isinstance(density_reason, str) or len(density_reason.strip()) < 4:
+        result.error(f"{label}: missing meaningful density_reason")
+
+    density_contract = page.get("density_contract")
+    if not isinstance(density_contract, dict):
+        result.error(f"{label}: missing density_contract")
+        return density_label, {}
+
+    deck_bias = density_contract.get("deck_bias")
+    if deck_bias not in VALID_DENSITY_BIASES:
+        result.error(f"{label}: density_contract.deck_bias must be one of {sorted(VALID_DENSITY_BIASES)}")
+
+    lower = normalize_density_label(density_contract.get("page_lower_bound"))
+    upper = normalize_density_label(density_contract.get("page_upper_bound"))
+    if lower is None:
+        result.error(f"{label}: density_contract.page_lower_bound is invalid")
+    if upper is None:
+        result.error(f"{label}: density_contract.page_upper_bound is invalid")
+    lower_rank = density_rank(lower)
+    upper_rank = density_rank(upper)
+    label_rank = density_rank(density_label)
+    if None not in (lower_rank, upper_rank) and lower_rank > upper_rank:
+        result.error(f"{label}: density_contract.page_lower_bound cannot be greater than page_upper_bound")
+    if None not in (lower_rank, upper_rank, label_rank) and not (lower_rank <= label_rank <= upper_rank):
+        result.error(f"{label}: density_label must stay within density_contract page bounds")
+
+    for field_name in ("max_cards", "max_charts", "min_body_font_px", "max_lines_per_card"):
+        value = density_contract.get(field_name)
+        if not isinstance(value, int) or value <= 0:
+            result.error(f"{label}: density_contract.{field_name} must be a positive integer")
+
+    image_policy = density_contract.get("image_policy")
+    if image_policy not in VALID_IMAGE_POLICIES:
+        result.error(f"{label}: density_contract.image_policy must be one of {sorted(VALID_IMAGE_POLICIES)}")
+
+    decoration_budget = density_contract.get("decoration_budget")
+    if decoration_budget not in VALID_DECORATION_BUDGETS:
+        result.error(f"{label}: density_contract.decoration_budget must be one of {sorted(VALID_DECORATION_BUDGETS)}")
+
+    overflow_strategy = density_contract.get("overflow_strategy")
+    if overflow_strategy not in VALID_OVERFLOW_STRATEGIES:
+        result.error(f"{label}: density_contract.overflow_strategy must be one of {sorted(VALID_OVERFLOW_STRATEGIES)}")
+
+    if density_label in DENSITY_DEFAULTS and isinstance(density_contract, dict):
+        defaults = DENSITY_DEFAULTS[density_label]
+        for key, expected in defaults.items():
+            actual = density_contract.get(key)
+            if actual != expected:
+                result.warn(f"{label}: density_contract.{key}={actual!r} != recommended {expected!r} for density_label={density_label}")
+
+    page_type = page.get("page_type")
+    if page_type in {"cover", "section", "end"} and density_label == "dashboard":
+        result.error(f"{label}: page_type '{page_type}' cannot use density_label 'dashboard'")
+    if density_label == "dashboard" and page_type != "content":
+        result.error(f"{label}: dashboard density_label is only allowed on content pages")
+    if density_label == "dashboard":
+        layout = page.get("layout_hint")
+        if layout not in {"mixed-grid", "t-shape"}:
+            result.error(f"{label}: dashboard pages must use layout_hint 'mixed-grid' or 't-shape'")
+        if image_policy != "decorate_only":
+            result.error(f"{label}: dashboard pages must use image_policy=decorate_only")
+
+    if page_type == "content" and deck_bias == "relaxed" and density_label == "dashboard":
+        result.error(f"{label}: relaxed deck_bias forbids dashboard content pages")
+    if page_type == "content" and deck_bias == "balanced" and label_rank is not None and label_rank < DENSITY_ORDER["mid_low"]:
+        result.error(f"{label}: balanced deck_bias content pages cannot be below mid_low")
+    if page_type == "content" and deck_bias == "ultra_dense" and label_rank is not None and label_rank < DENSITY_ORDER["medium"]:
+        result.error(f"{label}: ultra_dense deck_bias content pages cannot be below medium")
+
+    return density_label, density_contract
+
+
 def validate_page(page: dict[str, Any], refs_dir: Path | None) -> ValidationResult:
     result = ValidationResult()
     slide_number = page.get("slide_number")
     label = f"slide {slide_number if slide_number is not None else '?'}"
 
-    required_fields = ("slide_number", "page_type", "title", "page_goal", "cards", "visual_weight")
+    required_fields = (
+        "slide_number", "page_type", "title", "page_goal", "cards", "visual_weight",
+        "density_label", "density_reason", "density_contract",
+    )
     for field_name in required_fields:
         if field_name not in page:
             result.error(f"{label}: missing required field '{field_name}'")
@@ -331,6 +507,7 @@ def validate_page(page: dict[str, Any], refs_dir: Path | None) -> ValidationResu
         elif layout_hint not in VALID_LAYOUT_HINTS:
             result.warn(f"{label}: non-standard layout_hint '{layout_hint}'")
 
+    density_label, density_contract = validate_density_contract(page, label, result)
     validate_workflow_metadata(page, label, result)
 
     cards = [card for card in as_list(page.get("cards")) if isinstance(card, dict)]
@@ -339,11 +516,21 @@ def validate_page(page: dict[str, Any], refs_dir: Path | None) -> ValidationResu
     if not cards:
         result.error(f"{label}: cards[] is empty")
 
+    if isinstance(density_contract.get("max_cards"), int) and len(cards) > density_contract["max_cards"]:
+        result.error(f"{label}: cards count {len(cards)} exceeds density_contract.max_cards={density_contract['max_cards']}")
+
+    chart_count = sum(
+        1 for card in cards
+        if isinstance(card.get("chart"), dict) and isinstance(card.get("chart", {}).get("chart_type"), str)
+    )
+    if isinstance(density_contract.get("max_charts"), int) and chart_count > density_contract["max_charts"]:
+        result.error(f"{label}: chart count {chart_count} exceeds density_contract.max_charts={density_contract['max_charts']}")
+
     anchor_count = sum(1 for card in cards if card.get("role") == "anchor")
     if anchor_count == 0:
         result.error(f"{label}: missing anchor card")
     if anchor_count > 1:
-        result.warn(f"{label}: multiple anchor cards ({anchor_count})")
+        result.error(f"{label}: multiple anchor cards ({anchor_count})")
 
     card_styles = {card.get("card_style") for card in cards if isinstance(card.get("card_style"), str)}
     if page_type == "content" and len(cards) >= 2 and len(card_styles) < 2:
@@ -377,7 +564,7 @@ def validate_page(page: dict[str, Any], refs_dir: Path | None) -> ValidationResu
                         result.error(f"{label}: resources.{group} not found: {item}")
 
     for index, card in enumerate(cards, start=1):
-        validate_card(card, label, index, refs_dir, result)
+        validate_card(card, page, label, index, refs_dir, result)
 
     return result
 
@@ -389,9 +576,9 @@ def validate_cross_page(pages: list[dict[str, Any]]) -> ValidationResult:
 
     seen_numbers: set[int] = set()
     last_content_layout: str | None = None
-    high_weight_streak = 0
+    high_pressure_streak = 0
 
-    for page in pages:
+    for index, page in enumerate(pages):
         slide_number = page.get("slide_number")
         label = f"slide {slide_number}"
         if isinstance(slide_number, int):
@@ -405,13 +592,19 @@ def validate_cross_page(pages: list[dict[str, Any]]) -> ValidationResult:
                 result.warn(f"{label}: repeats previous content layout_hint '{layout}'")
             last_content_layout = layout if isinstance(layout, str) else last_content_layout
 
-        weight = page.get("visual_weight")
-        if isinstance(weight, int) and weight >= 7:
-            high_weight_streak += 1
+        density_label = normalize_density_label(page.get("density_label"))
+        if density_label in {"high", "dashboard"}:
+            high_pressure_streak += 1
         else:
-            high_weight_streak = 0
-        if high_weight_streak >= 3:
-            result.warn(f"{label}: 3 consecutive slides with visual_weight >= 7")
+            high_pressure_streak = 0
+        if high_pressure_streak >= 3:
+            result.error(f"{label}: 3 consecutive slides with density_label in {{high, dashboard}}")
+
+        if density_label == "dashboard":
+            prev_label = normalize_density_label(pages[index - 1].get("density_label")) if index > 0 else None
+            next_label = normalize_density_label(pages[index + 1].get("density_label")) if index + 1 < len(pages) else None
+            if prev_label is None or next_label is None or prev_label == "dashboard" or next_label == "dashboard":
+                result.error(f"{label}: dashboard 前后必须至少有 1 页非 dashboard 过渡")
 
     sorted_numbers = sorted(number for number in seen_numbers)
     if sorted_numbers and sorted_numbers != list(range(min(sorted_numbers), max(sorted_numbers) + 1)):

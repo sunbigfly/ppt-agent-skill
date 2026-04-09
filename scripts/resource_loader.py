@@ -358,10 +358,15 @@ def generate_image_inventory(images_dir: Path) -> str:
         ]
         image_files.sort(key=lambda p: _natural_text_key(str(p.relative_to(images_dir)).replace("\\", "/")))
 
+    try:
+        images_dir_display = images_dir.relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        images_dir_display = images_dir.as_posix()
+
     lines: list[str] = [
         "# Image Asset Inventory",
         "",
-        f"images_dir: {images_dir.resolve()}",
+        f"images_dir: {images_dir_display}",
         f"exists: {images_dir.is_dir()}",
         f"count: {len(image_files)}",
         "",
@@ -377,12 +382,10 @@ def generate_image_inventory(images_dir: Path) -> str:
 
     for idx, file_path in enumerate(image_files, start=1):
         rel = file_path.relative_to(images_dir).as_posix()
-        abs_path = file_path.resolve().as_posix()
         lines.append(f"{idx}. rel={rel}")
-        lines.append(f"   abs={abs_path}")
 
     lines.append("")
-    lines.append("约束：当 planning 选择 provided 模式时，image.source_hint 必须引用上面清单中的本地路径。")
+    lines.append("约束：当 planning 选择 provided 模式时，image.source_hint 必须引用上面清单中的相对路径。")
     return "\n".join(lines)
 
 

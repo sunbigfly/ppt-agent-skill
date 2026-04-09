@@ -24,7 +24,7 @@
 左右大纲页数、图文排布与数据源获取。
 
 - `expected_pages`: 5-10 页 / 10-20 页 / 20-30 页宽幅 / 自由发挥
-- `page_density`: 少而精 / 适中 / 容量极大
+- `page_density`: 少而精 / 适中 / 容量极大（注意：这是整套 deck 的整体倾向，不是要求每一页完全同密）
 - `material_strategy`: `research`（全网扩写）或 `local_only`（仅限当前提供资料）
 - `must_include` / `must_avoid`: 可要求用户补充唯一核心主张与绝对禁区
 
@@ -83,3 +83,4 @@
 
 2. `requirements-interview.txt`
    脱水的纯净参数组，同样必须包含上方基础 12 个锚点，以及模型 / 人工审计锚点，并带上丰富化后的明确取值，供 validator、Style、Outline、PageAgent 与后续人工返工节点直接消费。
+   若主 agent 已完成归一化，可额外补充 `density_bias: relaxed/balanced/ultra_dense` 作为内部派生字段；未补充时，下游必须根据 `page_density` 自行推导，不得报错。

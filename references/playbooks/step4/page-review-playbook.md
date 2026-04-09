@@ -33,7 +33,7 @@ cp PNG_OUTPUT REVIEW_DIR/roundX/slide-N.png
 ### 验证规则（第 2 轮起强制执行）
 
 从第 2 轮开始，只查看**本轮的最新截图**：
-1. **不要再读取第一轮或上一轮的图片**，你只需要用 `view_file` 查看 `REVIEW_DIR/roundX/slide-N.png`。
+1. **不要再读取第一轮或上一轮的图片**，你只需要用当前宿主可用的图像查看能力查看 `REVIEW_DIR/roundX/slide-N.png`。
 2. **逐条对照**上轮报告中所有 `[发现]` 项，在**新截图中确认**每项是否真正修复。
 3. 如果发觉自己确实改了 HTML，但新截图效果却无变化，检查 CSS 优先级或重试保存。
 
@@ -46,6 +46,12 @@ cp PNG_OUTPUT REVIEW_DIR/roundX/slide-N.png
 ## Part A：视觉扫描协议（每轮截图后必须执行）
 
 不要泛泛地"看一眼截图"。按以下物理路径系统扫描，每个区域用一句话记录观察：
+
+在开始三遍扫图前，先对照 `planning` 中的 `density_contract` 做 4 项合同核对：
+- 当前页的卡片数、图表数是否超预算
+- 正文是否明显小于 `min_body_font_px`
+- `image_policy` 是否被 HTML 偷偷突破
+- `decoration_budget` 是否被大水印、重光效、过量纹理突破
 
 ### 第 1 遍：边界巡逻（由外向内）
 
@@ -148,6 +154,8 @@ cp PNG_OUTPUT REVIEW_DIR/roundX/slide-N.png
 ### 本轮判定
 - P0 全部通过: 是/否
 - 修复动作数: N
+- 同类未收敛问题: [如有，列出问题 ID]
+- 是否触发回退 planning: 是/否
 - 进入下一轮: 是（仍有修复需验证）/ 否（达标，准备 FINALIZE）
 ```
 
@@ -230,6 +238,16 @@ P0（致命）→ P1（必修）→ P2（抛光）
 - **坚决不交带 P0 或 P1 的稿件。只要没修好，就一直修下去！**
 - **坚决不交第 1 轮就声称全通过但未经后续轮次物理截图验证的稿件。**
 
+### 回退止损规则（新增硬门）
+
+- 如果同一个 P0 / P1 类别在连续 2 轮的新截图里仍然存在，说明问题已经不是微调能解决，而是 planning 骨架或预算本身有问题。
+- 此时**停止继续修 HTML**，在报告中明确写出 `是否触发回退 planning: 是`，并说明需要重开的原因：
+  - 预算超载
+  - 布局承重墙错误
+  - 高密页错误使用大图/重装饰
+  - `dashboard` 不适合当前内容
+- 回退后必须重写 `density_label / density_contract / layout_hint / cards 分配` 中至少一项，禁止只改 5px 边距再回来。
+
 ---
 
 ## Part F：内容合同违约检查（对照 Runtime Failure Modes）
@@ -254,7 +272,7 @@ P0（致命）→ P1（必修）→ P2（抛光）
 在最后一轮截图通过人工扫描后，**必须运行自动化视觉断言脚本**作为客观验证：
 
 ```bash
-python3 SKILL_DIR/scripts/visual_qa.py PNG_OUTPUT --planning PLANNING_OUTPUT
+python3 SKILL_DIR/scripts/visual_qa.py PNG_OUTPUT --planning PLANNING_OUTPUT --html SLIDE_OUTPUT
 ```
 
 断言结果解读：

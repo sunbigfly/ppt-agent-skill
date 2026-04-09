@@ -5,6 +5,7 @@
 > 你需要按序完成三个阶段，每个阶段的全部指令存放在独立的 prompt 文件中。
 > **你必须逐阶段读取并执行——完成当前阶段后才能读下一个阶段的文件。**
 > **严格禁止调用工具去读取外层的 `SKILL.md` 或主控全局规则文件！**
+> 每次切换阶段前，都要把当前动作记入 `{{SUBAGENT_LOG_PATH}}`，避免主 agent 无法回看你的执行轨迹。
 
 ---
 
@@ -12,28 +13,40 @@
 
 ### 阶段 1：Planning（策划骨架）
 
-1. **读取** `{{PLANNING_PROMPT_PATH}}`
-2. 按文件中的指令完成全部工作，产出 `{{PLANNING_OUTPUT}}`
-3. 完成后在对话中输出：`--- STAGE 1 COMPLETE: {{PLANNING_OUTPUT}} ---`
-4. **立即进入阶段 2**（不等待外部指令）
+1. 先记录阶段日志：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py note --log {{SUBAGENT_LOG_PATH}} --label {{SUBAGENT_NAME}} --message "阶段 1：Planning -> {{PLANNING_PROMPT_PATH}}"
+   ```
+2. **读取** `{{PLANNING_PROMPT_PATH}}`
+3. 按文件中的指令完成全部工作，产出 `{{PLANNING_OUTPUT}}`
+4. 完成后在对话中输出：`--- STAGE 1 COMPLETE: {{PLANNING_OUTPUT}} ---`
+5. **立即进入阶段 2**（不等待外部指令）
 
 ### 阶段 2：HTML（设计稿生成）
 
 > **禁止在阶段 1 完成前读取此文件**
 
-1. **读取** `{{HTML_PROMPT_PATH}}`
-2. 按文件中的指令完成全部工作，产出 `{{SLIDE_OUTPUT}}`
-3. 完成后在对话中输出：`--- STAGE 2 COMPLETE: {{SLIDE_OUTPUT}} ---`
-4. **立即进入阶段 3**（不等待外部指令）
+1. 先记录阶段日志：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py note --log {{SUBAGENT_LOG_PATH}} --label {{SUBAGENT_NAME}} --message "阶段 2：HTML -> {{HTML_PROMPT_PATH}}"
+   ```
+2. **读取** `{{HTML_PROMPT_PATH}}`
+3. 按文件中的指令完成全部工作，产出 `{{SLIDE_OUTPUT}}`
+4. 完成后在对话中输出：`--- STAGE 2 COMPLETE: {{SLIDE_OUTPUT}} ---`
+5. **立即进入阶段 3**（不等待外部指令）
 
 ### 阶段 3：Review（视觉审查与修复）
 
 > **禁止在阶段 2 完成前读取此文件**
 
-1. **读取** `{{REVIEW_PROMPT_PATH}}`
-2. 按文件中的指令完成全部工作，产出 `{{PNG_OUTPUT}}`
-3. **铁律：最少完成 2 轮审查**。第 1 轮禁止 FINALIZE，必须进入第 2 轮验证修复是否真正落地
-4. P0 + P1 全部清零且 visual_qa.py 通过后，发送最终 FINALIZE
+1. 先记录阶段日志：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py note --log {{SUBAGENT_LOG_PATH}} --label {{SUBAGENT_NAME}} --message "阶段 3：Review -> {{REVIEW_PROMPT_PATH}}"
+   ```
+2. **读取** `{{REVIEW_PROMPT_PATH}}`
+3. 按文件中的指令完成全部工作，产出 `{{PNG_OUTPUT}}`
+4. **铁律：最少完成 2 轮审查**。第 1 轮禁止 FINALIZE，必须进入第 2 轮验证修复是否真正落地
+5. P0 + P1 全部清零且 visual_qa.py 通过后，发送最终 FINALIZE
 
 ---
 

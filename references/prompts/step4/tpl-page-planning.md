@@ -36,6 +36,7 @@
 | 图片素材目录 | `{{IMAGES_DIR}}` |
 | 图片清单快照 | `{{IMAGE_INVENTORY_PATH}}` |
 | 菜单快照 | `{{RESOURCE_MENU_PATH}}` |
+| 运行日志 | `{{SUBAGENT_LOG_PATH}}` |
 | SKILL 目录 | `{{SKILL_DIR}}` |
 | 资源目录 | `{{REFS_DIR}}` |
 
@@ -52,21 +53,23 @@
 
 ## 执行链路（固定顺序，不得跳步）
 
-1. 读取 `{{OUTLINE_PATH}}` 中第 {{PAGE_NUM}} 页的定义（只关注你这一页）
+1. 读取 `{{OUTLINE_PATH}}` 中第 {{PAGE_NUM}} 页的定义（只关注你这一页），特别提取 `密度下限 / 密度目标 / 密度上限 / 节奏动作 / 信息姿态 / 锚点类型`
 2. 深度读取 `{{REQUIREMENTS_PATH}}`，将其中的【受众画像】、【目标动作】和【版面心智】作为单页选型和内容设计的最高约束（例如：对底层技术受众放大图表卡片，对合作方主打对比及成果锚点）。
 3. 读取 `{{BRIEF_PATH}}` 获取可用素材
 4. 读取 `{{STYLE_PATH}}` 提取 `mood_keywords`、`variation_strategy`、`decoration_dna` 做情绪定调
 5. 读取主链已生成的**图片清单快照** `{{IMAGE_INVENTORY_PATH}}`。
 6. 如需刷新这份图片清单，再执行：
    ```bash
-   python3 {{SKILL_DIR}}/scripts/resource_loader.py images --images-dir {{IMAGES_DIR}} --output {{IMAGE_INVENTORY_PATH}}
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py run --log {{SUBAGENT_LOG_PATH}} --label planning-refresh-images -- \
+     python3 {{SKILL_DIR}}/scripts/resource_loader.py images --images-dir {{IMAGES_DIR}} --output {{IMAGE_INVENTORY_PATH}}
    ```
 7. 读取主链已生成的**组件/图表菜单快照** `{{RESOURCE_MENU_PATH}}`（这是给 runtime 留档的备份，也作为你本阶段优先使用的菜单视图）。
 8. 如需刷新这份菜单快照，再执行：
    ```bash
-   python3 {{SKILL_DIR}}/scripts/resource_loader.py menu --refs-dir {{REFS_DIR}} --output {{RESOURCE_MENU_PATH}}
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py run --log {{SUBAGENT_LOG_PATH}} --label planning-refresh-menu -- \
+     python3 {{SKILL_DIR}}/scripts/resource_loader.py menu --refs-dir {{REFS_DIR}} --output {{RESOURCE_MENU_PATH}}
    ```
-9. **回答以下设计提问来驱动你的资源选择决策**（你是高级架构工程师，所有的变异组合必须严密服务于骨架系统与视觉稳定），然后决定 `page_type`、`layout_hint`、`cards[].card_type`、`chart.chart_type`、`resource_ref`、`image.mode`、排版策略等。
+9. **先冻结密度合同，再回答设计提问**。你必须先确定 `density_label`、`density_reason` 和 `density_contract`，再决定 `page_type`、`layout_hint`、`cards[].card_type`、`chart.chart_type`、`resource_ref`、`image.mode`、排版策略等。
 
 ### 设计决策驱动提问
 
@@ -79,15 +82,18 @@
 
 > **重要**：菜单里的工具依然是你的调色盘。同样的数据可以用完全不同的工具和布局来表达，关键是你想让观众产生什么感受。设计原则参考文件与映射表是你绝好的灵感索引，你完全可以跨界混搭布局。
 > **唯一不可妥协的底线**：你可以自由构思并调配这些高级元素，但你的产物必须是精密计算后的产物！任何 `layout_hint` 或组件调用的选择，在下游环节都必须用符合其核心语义的底层结构去精确承接。你的奇思妙想不能以牺牲布局崩塌为代价。
+> **密度红线**：`density_label` 只能落在 outline 给你的窗口里。`dashboard` 只允许 `content` 页，且必须同时把 `image_policy` 锁成 `decorate_only`。
 
 **填写 `resources` 字段时必须说明选择理由**（推荐写入 `resources.resource_rationale`），例如回答"为什么用这个布局/组件能最好地让观众产生我想要的感受"。
 10. 将完整 planning 写入 `{{PLANNING_OUTPUT}}`，并同步备份到 `{{PLANNING_RUNTIME_COPY_PATH}}`：
    ```bash
-   cp {{PLANNING_OUTPUT}} {{PLANNING_RUNTIME_COPY_PATH}}
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py run --log {{SUBAGENT_LOG_PATH}} --label planning-runtime-copy -- \
+     cp {{PLANNING_OUTPUT}} {{PLANNING_RUNTIME_COPY_PATH}}
    ```
 11. 自审（必须执行，不得跳过）：
    ```bash
-   python3 {{SKILL_DIR}}/scripts/planning_validator.py $(dirname {{PLANNING_OUTPUT}}) --refs {{REFS_DIR}} --page {{PAGE_NUM}} --report {{PLANNING_VALIDATOR_REPORT_PATH}}
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py run --log {{SUBAGENT_LOG_PATH}} --label planning-validator -- \
+     python3 {{SKILL_DIR}}/scripts/planning_validator.py $(dirname {{PLANNING_OUTPUT}}) --refs {{REFS_DIR}} --page {{PAGE_NUM}} --report {{PLANNING_VALIDATOR_REPORT_PATH}}
    ```
 12. 修复所有 ERROR（WARNING 建议修复）。
 13. 完成信号：输出 `--- STAGE 1 COMPLETE: {{PLANNING_OUTPUT}} ---`，然后按外层 orchestrator 协议继续下一阶段

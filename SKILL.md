@@ -3,7 +3,7 @@ name: ppt-agent
 description: 专业 PPT 演示文稿全流程 AI 生成助手。模拟顶级 PPT 设计公司的完整工作流（需求调研到资料搜集到大纲策划到策划稿到设计稿），输出高质量 HTML 格式演示文稿。当用户提到制作 PPT、做演示文稿、做 slides、做幻灯片、做汇报材料、做培训课件、做路演 deck、做产品介绍页面时触发此技能。即使用户只说"帮我做个关于 X 的介绍"或"我要给老板汇报 Y"，只要暗示需要结构化的多页演示内容，都应该触发。也适用于用户说"帮我把这篇文档做成 PPT"、"把这个主题做成演示"等需要将内容转化为演示格式的场景。英文场景同样适用："make a presentation about..."、"create slides for..."、"build a pitch deck"、"I need a keynote for..."。隐式意图也应触发："帮我把这个数据可视化一下给老板看"、"我需要一份能拿去路演的东西"、"把这个报告做得好看点能展示"、"beautify my existing PPT"、"redesign these slides"。改善或美化现有 PPT 也属于此技能范畴。
 ---
 
-# PPT Agent v4 — 主控制台合同
+# PPT Agent v4.1 — 主控制台合同
 
 ## 1. 主 Agent 角色
 
@@ -266,13 +266,19 @@ P5.04  写入 delivery-manifest.json
 | Prompt 模板 | `references/prompts/tpl-*.md` | 传路径给 harness，不手动预读 |
 | 执行细则 | `references/playbooks/*-playbook.md` | `--inject-file` 注入 |
 | 风格真源 | `references/styles/runtime-style-*.md` | Step 3.5 注入 |
+| 大纲/采访/交付合同 | `scripts/contract_validator.py` | P0 / P3 / P5 Gate |
+| Step 4 schema 真源 | `scripts/planning_validator.py` | P4 planning Gate |
+| Step 4 图审与结构校验 | `scripts/visual_qa.py` | P4 PNG + planning + HTML 双层 Gate |
 | CLI 命令 | `references/cli-cheatsheet.md` | Step 0 前读取，后续直接引用 |
 
 `CURRENT_BRIEF_PATH`：research → `search-brief.txt`；非 research → `source-brief.txt`（Step 3/4 共用）。
 
 ### 5.3 单一真源与自动检查
 
+- **workflow / schema 版本真源**：`scripts/workflow_versions.py`（当前 `WORKFLOW_VERSION = 2026.04.09-v4.1`）
 - **Step 4 schema 真源**：`scripts/planning_validator.py`
+- **outline 密度合同真源**：`scripts/contract_validator.py`
+- **Step 4 结构/像素双层校验真源**：`scripts/visual_qa.py`
 - **prompt 变量真源**：各 `references/prompts/tpl-*.md` 模板中的 `{{VAR}}`
 - **资源 ID 真源**：`references/layouts/`、`references/blocks/`、`references/charts/`、`references/principles/` 的真实文件 stem，与 `scripts/resource_loader.py` 的归一化规则
 - **多阶段完成信号真源**：各 orchestrator 模板中的阶段协议
@@ -288,9 +294,9 @@ P5.04  写入 delivery-manifest.json
 | P1 | 识别输入确定分支 | 分支写入 requirements-interview.txt | 逻辑判断 | WAIT_USER |
 | P2A | 检索并压缩资料 | search.txt / search-brief.txt | `contract_validator search` + `search-brief` | 回退 `P2A.01` 重建 ResearchSynth（扩大搜索预算/维度） |
 | P2B | 压缩用户现有资料 | source-brief.txt | `contract_validator source-brief` | 回 P2B 重写 |
-| P3 | 生成大纲（内部自审） | outline.txt | `contract_validator outline` | 回退 `P3.01` 重建 Outline subagent，最多 2 轮；仍失败则 `BLOCKED_OUTLINE` 呼叫用户裁决 |
+| P3 | 生成大纲（内部自审） | outline.txt | `contract_validator outline`（含 `density_bias / density_curve / 单页密度窗口`） | 回退 `P3.01` 重建 Outline subagent，最多 2 轮；仍失败则 `BLOCKED_OUTLINE` 呼叫用户裁决 |
 | P3.5 | 固定全局风格 | style.json | `contract_validator style` | 回 P3.5 |
-| P4 | 并行生产各页 | planningN.json / slide-N.html / slide-N.png | `planning_validator` + 三件套存在性 + `visual_qa` + 主 agent 看图 + （若开启）用户人工图审通过 | 只回退该页；人工图审未通过时默认从 `review` 重开 |
+| P4 | 并行生产各页 | planningN.json / slide-N.html / slide-N.png | `planning_validator` + 三件套存在性 + `visual_qa`（PNG + planning + HTML）+ 主 agent 看图 + （若开启）用户人工图审通过 | 只回退该页；人工图审未通过时默认从 `review` 重开；同类 P0/P1 连续 2 轮不收敛则强制回退 `planning` |
 | P5 | 导出交付 | preview.html / 双 pptx / delivery-manifest.json | `contract_validator delivery-manifest` | 只回退导出 |
 
 > 所有命令完整参数见 `cli-cheatsheet.md`。
@@ -302,6 +308,11 @@ P5.04  写入 delivery-manifest.json
 - **默认执行方式**：优先按环境能力生成使用结构化采访 UI（`tpl-interview-structured-ui.md`），若不支持则用格式清晰且附带选项的文本问答（`tpl-interview-text-fallback.md`）。
 - **结构化输出约束**：通过提示向用户提供明确的备选项。最终收集的字段组合必须高度结构化、数据详实，能直接输出至 `requirements-interview.txt` 并 100% 被下游验证器（Gate）与子系统（Subagent）解析消费，无需推测与加工。
 - **必须覆盖但允许精简（如果已知）的维度**：场景、受众、核心传达目标、期望页数与密度、风格倾向、品牌规范、配图策略、资料使用范围，以及是否参与中间人工审计。
+- **密度归一化约定（Step 0 就要定死）**：用户填写的 `page_density` 只表示整套 deck 的整体倾向，不等于每页固定密度。内部统一映射为 `density_bias`：
+  - `少而精 -> relaxed`
+  - `适中 -> balanced`
+  - `容量极大 -> ultra_dense`
+- 后续单页差异由 `outline` 产出的 `density_curve` 决定，不交给 `html` 临场发挥。
 - **subagent 模型与思考深度（必问）**：直截了当让用户选「后续子系统使用什么模型，以及需要何种等级的思考深度？」（如低/中/高，或者普通/深度思考，视当前模型生态而定）。选出后分别固化在 `SUBAGENT_MODEL` 和 `SUBAGENT_THINKING_EFFORT` 全局变量。如果用户不关心，可以默认 `SUBAGENT_MODEL = MAIN_MODEL` 并使用中等思考等级。
 - **人工审计参与方式（必问）**：至少固化 `manual_audit_mode`、`manual_audit_scope`、`manual_audit_assets` 这 3 个字段；具体选项与提问形式放在采访模板里维护，不在 `SKILL.md` 展开。
 - 只有所有重要选项收集齐并固化入 `requirements-interview.txt`（必须包含模型、思考深度和人工审计参数），才能进入 Step 1。
@@ -346,6 +357,12 @@ P5.04  写入 delivery-manifest.json
 
 **核心纪律**：主 agent 不要自作聪明显式开启后续的审查验证轮回。Outline subagent 设计为自带闭环属性，它会在内部按照【打草稿 → 严格自查缺陷 → 覆盖修复】的死循环直到完美状态，只有这样它才会交出带有 FINALIZE 的最终 `outline.txt`。
 
+这一步不只是在排页序，也要先把整套密度节奏定下来：
+- `outline` 必须显式产出 deck 级 `density_bias` 和整套 `density_curve`
+- 每页必须写完整的 `密度下限 / 密度目标 / 密度上限 / 节奏动作 / 信息姿态 / 锚点类型`
+- 共同硬规则：`cover / section / end` 不允许 `dashboard`；禁止连续 3 页 `high / dashboard`；`dashboard` 前后必须至少有 1 页非 `dashboard` 过渡
+- `contract_validator outline` 会直接检查这些字段，不允许把“页差”留到 Step 4 再临时决定
+
 ### 6.7 Step 3.5 风格锁定（全局卡口）
 
 全盘风格定调。只有在明确了需求文本跑出的大纲后才定风格。风格判断不仅看需求，更依赖 `runtime-style-rules.md`。输出：一份精准的、没有含糊描述、能被页面规划和 HTML 代码直接执行的 `style.json`。
@@ -353,6 +370,12 @@ P5.04  写入 delivery-manifest.json
 ### 6.8 Step 4 单页并行生产（orchestrator 渐进式披露）
 
 为防止大模型在一次 prompt 中同时兼顾排版、图文推演与 HTML 编码导致「注意力塌陷」，本阶段每个单页的任务被拆散成三级 prompt（4A Planning -> 4B HTML -> 4C Review）。
+
+这里的密度合同是冻结点，不是建议项：
+- `planning` 必须把 outline 给出的密度窗口冻结成 `density_label`、`density_reason`、`density_contract`
+- `density_contract` 至少要包含 `deck_bias`、`page_lower_bound`、`page_upper_bound`、`max_cards`、`max_charts`、`min_body_font_px`、`max_lines_per_card`、`image_policy`、`decoration_budget`、`overflow_strategy`
+- `content_budget` 是卡片级硬预算，缺失就算失败；它必须继续服从页级 `density_contract`
+- 从这一步开始，`html` 只负责执行，不允许自己抬高或降低本页密度
 
 #### 执行模式
 
@@ -377,7 +400,10 @@ Step 4 只保留两种模式：
 #### 共通规则
 
 - 各页可以且应当**并行推进**。
-- **阶段放行条件**：三件套（planningN.json + slide-N.html + slide-N.png）必须齐全，`planning_validator` 必须放行；整页 FINALIZE 回收后，主 agent 还必须补跑 `visual_qa` 并亲自看图；若开启人工审计，还必须拿到用户在 `review` 后的明确“通过”。这些条件同时满足才算该页放行。
+- `HTML` 必须完全服从 `planning`：`low / mid_low` 可高自由度，`medium` 中自由度，`high / dashboard` 低自由度。高密页统一优先稳态 `grid / flex`、短语化文案、表格/矩阵/微图表；禁 `hero image`、禁重装饰、禁多个主锚点并列、禁靠复杂绝对定位硬塞内容。
+- `review` 必须先核对 `density_contract`，再看 PNG 视觉质量。
+- 如果同一个 `P0 / P1` 类别在连续 2 轮新截图里仍不收敛，说明问题已经回到预算或骨架层，必须停止继续修 HTML，强制回退 `planning`，重写 `density_label / density_contract / layout_hint / cards 分配` 中至少一项。
+- **阶段放行条件**：三件套（planningN.json + slide-N.html + slide-N.png）必须齐全，`planning_validator` 必须放行；整页 FINALIZE 回收后，主 agent 还必须补跑 `visual_qa --html` 并亲自看图；若开启人工审计，还必须拿到用户在 `review` 后的明确“通过”。这些条件同时满足才算该页放行。
 - subagent 死亡 = 上下文全无。任何出错重试，旧 session 失去价值，**必须整页打回重跑（详见 Section 7）**。
 
 ### 6.9 Step 5 交付
@@ -397,10 +423,11 @@ Step 4 只保留两种模式：
 - `visual_qa.py` 退出码为 1（致命缺陷）
 - 主 agent 亲自看图发现明显视觉问题
 - 用户在 `review` 后强制人工图审卡口明确表示未通过
+- 同类 `P0 / P1` 问题连续 2 轮不收敛，需要回退 `planning`
 
 **第二步：并行重跑** — 收集完毕后，一次性并行启动所有失败页：清三件套及 review 图片残留 → 从 `P4.NN.01` 开始重跑（先生成 prompt，再创建 PageAgent，随后 RUN orchestrator）。
 
-若失败来源只是 `review` 后人工图审未通过，主 agent 默认不要整页从头重跑，而是保留现有 planning/html，显式改用 `PagePatchAgent-N` 从 `review` 重开；只有用户明确要求改结构，或多轮 `review` 修复仍无效，才退回 `html/planning` 或整页重跑。最终放行标准仍与完整 Step 4 完全一致。
+若失败来源只是 `review` 后人工图审未通过，主 agent 默认不要整页从头重跑，而是保留现有 planning/html，显式改用 `PagePatchAgent-N` 从 `review` 重开；只有用户明确要求改结构，或多轮 `review` 修复仍无效，才退回 `html/planning` 或整页重跑。若已经触发“同类 P0 / P1 连续 2 轮不收敛”，则不再允许继续打补丁，必须退回 `planning` 重新冻结预算与骨架。最终放行标准仍与完整 Step 4 完全一致。
 
 单页连续 3 次失败 → 标记 `BLOCKED_PAGE_N`，先跳过推进其余页，最后集中处理。
 

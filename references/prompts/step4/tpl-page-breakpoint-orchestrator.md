@@ -21,6 +21,7 @@
 | planning 输出 | `{{PLANNING_OUTPUT}}` |
 | HTML 输出 | `{{SLIDE_OUTPUT}}` |
 | PNG 输出 | `{{PNG_OUTPUT}}` |
+| 运行日志 | `{{SUBAGENT_LOG_PATH}}` |
 
 ---
 
@@ -37,24 +38,36 @@
 
 ### A. 当起跑节点是 `planning`
 
-1. 读取 `{{PLANNING_PROMPT_PATH}}`
-2. 结合用户补充要求，重做 `{{PLANNING_OUTPUT}}`
-3. 若 `{{END_STAGE}} = planning`，立即 FINALIZE；否则继续进入 HTML，再进入 Review
+1. 先记录阶段日志：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py note --log {{SUBAGENT_LOG_PATH}} --label {{SUBAGENT_NAME}} --message "断点返工：Planning -> {{PLANNING_PROMPT_PATH}}"
+   ```
+2. 读取 `{{PLANNING_PROMPT_PATH}}`
+3. 结合用户补充要求，重做 `{{PLANNING_OUTPUT}}`
+4. 若 `{{END_STAGE}} = planning`，立即 FINALIZE；否则继续进入 HTML，再进入 Review
 
 ### B. 当起跑节点是 `html`
 
-1. 默认复用现有 `{{PLANNING_OUTPUT}}`
-2. 读取 `{{HTML_PROMPT_PATH}}`
-3. 结合用户补充要求，重做 `{{SLIDE_OUTPUT}}`
-4. 若 `{{END_STAGE}} = html`，立即 FINALIZE；否则继续进入 Review
+1. 先记录阶段日志：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py note --log {{SUBAGENT_LOG_PATH}} --label {{SUBAGENT_NAME}} --message "断点返工：HTML -> {{HTML_PROMPT_PATH}}"
+   ```
+2. 默认复用现有 `{{PLANNING_OUTPUT}}`
+3. 读取 `{{HTML_PROMPT_PATH}}`
+4. 结合用户补充要求，重做 `{{SLIDE_OUTPUT}}`
+5. 若 `{{END_STAGE}} = html`，立即 FINALIZE；否则继续进入 Review
 
 ### C. 当起跑节点是 `review`
 
-1. 默认复用现有 `{{PLANNING_OUTPUT}}` 与 `{{SLIDE_OUTPUT}}`
-2. 若 `{{TARGET_ASSET_PATH}}` 不是 `none`，优先读取用户点名的图片或审查存档：`{{TARGET_ASSET_PATH}}`
-3. 读取 `{{REVIEW_PROMPT_PATH}}`
-4. 在图审循环里允许直接修改 `{{SLIDE_OUTPUT}}` 的 HTML/CSS，并重新截图到 `{{PNG_OUTPUT}}`
-5. 当 `{{END_STAGE}} = review` 时，必须完成一次真实截图校验后才能 FINALIZE
+1. 先记录阶段日志：
+   ```bash
+   python3 {{SKILL_DIR}}/scripts/subagent_logger.py note --log {{SUBAGENT_LOG_PATH}} --label {{SUBAGENT_NAME}} --message "断点返工：Review -> {{REVIEW_PROMPT_PATH}}"
+   ```
+2. 默认复用现有 `{{PLANNING_OUTPUT}}` 与 `{{SLIDE_OUTPUT}}`
+3. 若 `{{TARGET_ASSET_PATH}}` 不是 `none`，优先读取用户点名的图片或审查存档：`{{TARGET_ASSET_PATH}}`
+4. 读取 `{{REVIEW_PROMPT_PATH}}`
+5. 在图审循环里允许直接修改 `{{SLIDE_OUTPUT}}` 的 HTML/CSS，并重新截图到 `{{PNG_OUTPUT}}`
+6. 当 `{{END_STAGE}} = review` 时，必须完成一次真实截图校验后才能 FINALIZE
 
 ---
 

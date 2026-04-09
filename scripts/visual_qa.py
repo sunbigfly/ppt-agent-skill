@@ -6,13 +6,13 @@
 
 用法：
     # 检查单页
-    python3 scripts/visual_qa.py OUTPUT_DIR/png/slide-1.png --planning OUTPUT_DIR/planning/planning1.json
+    python3 scripts/visual_qa.py OUTPUT_DIR/png/slide-1.png --planning OUTPUT_DIR/planning/planning1.json --html OUTPUT_DIR/slides/slide-1.html
 
     # 批量检查所有页
-    python3 scripts/visual_qa.py OUTPUT_DIR/png --planning-dir OUTPUT_DIR/planning
+    python3 scripts/visual_qa.py OUTPUT_DIR/png --planning-dir OUTPUT_DIR/planning --html-dir OUTPUT_DIR/slides
 
     # 同时把文本报告写入 runtime
-    python3 scripts/visual_qa.py OUTPUT_DIR/png/slide-1.png --planning OUTPUT_DIR/planning/planning1.json --output OUTPUT_DIR/runtime/page-review-qa-1.txt
+    python3 scripts/visual_qa.py OUTPUT_DIR/png/slide-1.png --planning OUTPUT_DIR/planning/planning1.json --html OUTPUT_DIR/slides/slide-1.html --output OUTPUT_DIR/runtime/page-review-qa-1.txt
 
 退出码：
     0 = 全部通过
@@ -21,7 +21,7 @@
 """
 
 import json
-import os
+import re
 import sys
 from pathlib import Path
 
@@ -31,6 +31,14 @@ try:
 except ImportError:
     print("ERROR: Pillow is required. Install with: pip install Pillow", file=sys.stderr)
     sys.exit(1)
+
+
+DECORATION_BUDGET_LIMITS = {
+    "generous": 6,
+    "medium": 4,
+    "low": 2,
+    "minimal": 1,
+}
 
 
 # ─────────────────────── 检测函数 ───────────────────────
@@ -92,7 +100,7 @@ def check_vertical_text(img: Image.Image) -> dict:
     """辅助检测：是否存在疑似竖排单字列。
 
     注意：此检测为辅助提示（WARN），不做最终判定。
-    排版质量的真正判断应由 LLM view_file 看 PNG 截图完成。
+    排版质量的真正判断应由 LLM 通过宿主可用的图像查看能力看 PNG 截图完成。
     """
     w, h = img.size
     right_half = img.crop((w // 2, 0, w, h))
@@ -279,9 +287,166 @@ def check_planning_cards_coverage(img: Image.Image, planning_path: Path) -> dict
             "msg": f"planning {card_count} 张卡片，图片边缘密度 {edge_density:.3f}"}
 
 
+def load_planning_page(planning_path: Path) -> dict | None:
+    if not planning_path.exists():
+        return None
+    try:
+        payload = json.loads(planning_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, dict) and isinstance(payload.get("page"), dict):
+        return payload["page"]
+    return payload if isinstance(payload, dict) else None
+
+
+def check_density_contract_budget(planning_path: Path) -> list[dict]:
+    page = load_planning_page(planning_path)
+    if not isinstance(page, dict):
+        return [{"id": "DENS-01", "status": "WARN", "msg": "planning JSON 解析失败，跳过密度合同检查"}]
+
+    density_contract = page.get("density_contract")
+    if not isinstance(density_contract, dict):
+        return [{"id": "DENS-01", "status": "FAIL", "msg": "planning 缺少 density_contract"}]
+
+    cards = [card for card in page.get("cards", []) if isinstance(card, dict)]
+    chart_count = sum(
+        1 for card in cards
+        if isinstance(card.get("chart"), dict) and isinstance(card.get("chart", {}).get("chart_type"), str)
+    )
+    results: list[dict] = []
+
+    max_cards = density_contract.get("max_cards")
+    if isinstance(max_cards, int) and len(cards) > max_cards:
+        results.append({"id": "DENS-01", "status": "FAIL", "msg": f"卡片数 {len(cards)} 超过 density_contract.max_cards={max_cards}"})
+    else:
+        results.append({"id": "DENS-01", "status": "PASS", "msg": f"卡片数 {len(cards)} / 上限 {max_cards}"})
+
+    max_charts = density_contract.get("max_charts")
+    if isinstance(max_charts, int) and chart_count > max_charts:
+        results.append({"id": "DENS-02", "status": "FAIL", "msg": f"图表数 {chart_count} 超过 density_contract.max_charts={max_charts}"})
+    else:
+        results.append({"id": "DENS-02", "status": "PASS", "msg": f"图表数 {chart_count} / 上限 {max_charts}"})
+
+    density_label = str(page.get("density_label") or "").strip().lower()
+    image_policy = density_contract.get("image_policy")
+    if density_label == "dashboard":
+        has_needed_image = any(isinstance(card.get("image"), dict) and card["image"].get("needed") for card in cards)
+        has_image_hero = any(card.get("card_type") == "image_hero" for card in cards)
+        if image_policy != "decorate_only" or has_needed_image or has_image_hero:
+            results.append(
+                {
+                    "id": "DENS-03",
+                    "status": "FAIL",
+                    "msg": "dashboard 页必须使用 decorate_only，且不得包含 image_hero 或外部图片合同",
+                }
+            )
+        else:
+            results.append({"id": "DENS-03", "status": "PASS", "msg": "dashboard 图片策略符合合同"})
+
+    return results
+
+
+def check_html_contracts(html_path: Path, planning_path: Path | None) -> list[dict]:
+    if not html_path.exists():
+        return [{"id": "HTML-01", "status": "FAIL", "msg": f"html 文件不存在: {html_path}"}]
+
+    text = html_path.read_text(encoding="utf-8")
+    page = load_planning_page(planning_path) if planning_path else None
+    page_type = str((page or {}).get("page_type") or "").strip().lower()
+    density_label = str((page or {}).get("density_label") or "").strip().lower()
+    density_contract = (page or {}).get("density_contract") if isinstance((page or {}).get("density_contract"), dict) else {}
+    results: list[dict] = []
+
+    if page_type in {"content", "toc", "section"}:
+        header_ok = bool(re.search(r'<header[^>]*class=([\'"])[^\'"]*\bslide-header\b[^\'"]*\1', text, re.IGNORECASE))
+        footer_ok = bool(re.search(r'<footer[^>]*class=([\'"])[^\'"]*\bslide-footer\b[^\'"]*\1', text, re.IGNORECASE))
+        results.append({"id": "HTML-01", "status": "PASS" if header_ok else "FAIL", "msg": "header.slide-header 存在" if header_ok else "缺少统一标题区 header.slide-header"})
+        results.append({"id": "HTML-02", "status": "PASS" if footer_ok else "FAIL", "msg": "footer.slide-footer 存在" if footer_ok else "缺少统一页脚 footer.slide-footer"})
+
+    if isinstance(page, dict):
+        expected_ids = [str(card.get("card_id")).strip() for card in page.get("cards", []) if isinstance(card, dict) and str(card.get("card_id") or "").strip()]
+        missing_ids = [card_id for card_id in expected_ids if f'data-card-id="{card_id}"' not in text and f"data-card-id='{card_id}'" not in text]
+        if missing_ids:
+            results.append({"id": "HTML-03", "status": "FAIL", "msg": f"缺少 data-card-id 节点: {missing_ids[:5]}"})
+        else:
+            results.append({"id": "HTML-03", "status": "PASS", "msg": f"全部 {len(expected_ids)} 个 data-card-id 已落地"})
+
+    if density_label == "dashboard":
+        has_img = "<img" in text.lower()
+        has_bg_url = "background-image" in text.lower() and "url(" in text.lower()
+        if has_img or has_bg_url:
+            results.append({"id": "HTML-04", "status": "FAIL", "msg": "dashboard 页不应出现外部图片或 background-image url()"})
+        else:
+            results.append({"id": "HTML-04", "status": "PASS", "msg": "dashboard 页未检测到外部图片依赖"})
+
+    if re.search(r"<img\b", text, flags=re.IGNORECASE):
+        object_fit_ok = "object-fit: cover" in text.lower() or "object-fit:contain" in text.lower() or "object-fit: contain" in text.lower()
+        results.append({"id": "HTML-05", "status": "PASS" if object_fit_ok else "WARN", "msg": "检测到 img 且 object-fit 已声明" if object_fit_ok else "检测到 img，但未发现 object-fit 声明，建议人工确认是否会拉伸"})
+
+    min_body_font = density_contract.get("min_body_font_px")
+    if isinstance(min_body_font, int):
+        font_sizes = [int(item) for item in re.findall(r"font-size\s*:\s*(\d+)px", text, flags=re.IGNORECASE)]
+        if font_sizes:
+            too_small = [size for size in font_sizes if size < min_body_font]
+            if too_small and min(too_small) <= max(10, min_body_font - 4):
+                results.append({"id": "HTML-06", "status": "FAIL", "msg": f"检测到字体低于合同下限 {min_body_font}px：最小 {min(too_small)}px"})
+            elif too_small:
+                results.append({"id": "HTML-06", "status": "WARN", "msg": f"检测到低于合同下限 {min_body_font}px 的字体 {sorted(set(too_small))}，请人工确认是否为正文"})
+            else:
+                results.append({"id": "HTML-06", "status": "PASS", "msg": f"未检测到明显低于 {min_body_font}px 的字体"})
+
+    decoration_budget = density_contract.get("decoration_budget")
+    decoration_tags = re.findall(
+        r"<[^>]*data-decoration-layer\s*=\s*(['\"])(background|floating|page-accent)\1[^>]*>",
+        text,
+        flags=re.IGNORECASE,
+    )
+    marker_count = len(decoration_tags)
+    if decoration_budget in DECORATION_BUDGET_LIMITS:
+        max_allowed = DECORATION_BUDGET_LIMITS[decoration_budget]
+        if marker_count > max_allowed:
+            results.append(
+                {
+                    "id": "HTML-07",
+                    "status": "FAIL",
+                    "msg": f"装饰节点 {marker_count} 个，超过 decoration_budget={decoration_budget} 的上限 {max_allowed}",
+                }
+            )
+        else:
+            results.append(
+                {
+                    "id": "HTML-07",
+                    "status": "PASS",
+                    "msg": f"装饰节点 {marker_count} / 上限 {max_allowed}（budget={decoration_budget}）",
+                }
+            )
+
+    invalid_decoration_tags = []
+    for match in re.finditer(r"<[^>]*data-decoration-layer\s*=\s*(['\"])(background|floating|page-accent)\1[^>]*>", text, flags=re.IGNORECASE):
+        tag = match.group(0)
+        if not re.search(r"aria-hidden\s*=\s*(['\"])true\1", tag, flags=re.IGNORECASE):
+            invalid_decoration_tags.append(tag)
+    if invalid_decoration_tags:
+        results.append(
+            {
+                "id": "HTML-08",
+                "status": "FAIL",
+                "msg": f"检测到 {len(invalid_decoration_tags)} 个装饰节点缺少 aria-hidden=\"true\"",
+            }
+        )
+    elif marker_count:
+        results.append({"id": "HTML-08", "status": "PASS", "msg": f"全部 {marker_count} 个装饰节点已标记 aria-hidden=\"true\""})
+
+    return results
+
+
 # ─────────────────────── 主逻辑 ───────────────────────
 
-def run_checks(png_path: Path, planning_path: Path | None = None) -> list[dict]:
+def run_checks(
+    png_path: Path,
+    planning_path: Path | None = None,
+    html_path: Path | None = None,
+) -> list[dict]:
     """对单张 PNG 运行全部检测。"""
     results = []
 
@@ -305,6 +470,10 @@ def run_checks(png_path: Path, planning_path: Path | None = None) -> list[dict]:
     # planning 对照检查
     if planning_path:
         results.append(check_planning_cards_coverage(img, planning_path))
+        results.extend(check_density_contract_budget(planning_path))
+
+    if html_path:
+        results.extend(check_html_contracts(html_path, planning_path))
 
     return results
 
@@ -363,6 +532,8 @@ def main():
     # 解析可选参数
     planning_path = None
     planning_dir = None
+    html_path = None
+    html_dir = None
     output_path = None
     args = sys.argv[2:]
     i = 0
@@ -372,6 +543,12 @@ def main():
             i += 2
         elif args[i] == "--planning-dir" and i + 1 < len(args):
             planning_dir = Path(args[i + 1]).resolve()
+            i += 2
+        elif args[i] == "--html" and i + 1 < len(args):
+            html_path = Path(args[i + 1]).resolve()
+            i += 2
+        elif args[i] == "--html-dir" and i + 1 < len(args):
+            html_dir = Path(args[i + 1]).resolve()
             i += 2
         elif args[i] == "--output" and i + 1 < len(args):
             output_path = Path(args[i + 1]).resolve()
@@ -399,14 +576,18 @@ def main():
     for png in pngs:
         # 自动推断 planning 路径
         pp = planning_path
+        hh = html_path
         if pp is None and planning_dir:
             # slide-3.png -> planning3.json
-            import re
             m = re.search(r"slide-(\d+)", png.stem)
             if m:
                 pp = planning_dir / f"planning{m.group(1)}.json"
+        if hh is None and html_dir:
+            m = re.search(r"slide-(\d+)", png.stem)
+            if m:
+                hh = html_dir / f"slide-{m.group(1)}.html"
 
-        results = run_checks(png, pp)
+        results = run_checks(png, pp, hh)
         lines, f, w = build_report_lines(png.name, results)
         report_lines.extend(lines)
         print("\n".join(lines))

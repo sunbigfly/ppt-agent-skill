@@ -4,14 +4,17 @@
 This script intentionally stays within the current markdown/code architecture.
 It exercises the most failure-prone integration points:
 1. Step 0 interview prompt rendering (structured/text dual templates)
-2. Step 4 planning example -> planning_validator.py
-3. resource_loader.py menu / resolve / images
-4. prompt_harness.py for the Step 4 prompt chain
+2. Step 3 outline density contract for relaxed / balanced / ultra_dense
+3. Step 4 planning density labels / deck_bias windows -> planning_validator.py
+4. visual_qa.py for PNG + planning + HTML double checks
+5. resource_loader.py menu / resolve / images
+6. prompt_harness.py for the Step 4 prompt chain
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -20,12 +23,19 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from planning_validator import DENSITY_DEFAULTS  # noqa: E402
 from workflow_versions import (  # noqa: E402
     PLANNING_CONTINUITY_VERSION,
     PLANNING_PACKET_VERSION,
     PLANNING_SCHEMA_VERSION,
     WORKFLOW_VERSION,
 )
+
+try:
+    from PIL import Image, ImageDraw
+except ImportError:  # pragma: no cover - smoke will fail later with a clear error
+    Image = None
+    ImageDraw = None
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -37,6 +47,11 @@ PAGE_TEMPLATE_EXPECTATIONS = {
     "toc": "# 目录页 -- 演讲的地图俯瞰",
     "section": "# 章节封面页 -- 演讲中的呼吸",
     "end": "# 结束页 -- 演讲的最后一个视觉印记",
+}
+BIAS_BOUNDS = {
+    "relaxed": ("low", "medium"),
+    "balanced": ("mid_low", "high"),
+    "ultra_dense": ("medium", "dashboard"),
 }
 
 
@@ -75,44 +90,206 @@ def run_cmd(label: str, args: list[str], result: SmokeResult, cwd: Path = ROOT_D
     return proc
 
 
+def run_cmd_expect_failure(
+    label: str,
+    args: list[str],
+    result: SmokeResult,
+    expected_tokens: list[str] | None = None,
+    cwd: Path = ROOT_DIR,
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(
+        args,
+        cwd=str(cwd),
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        result.error(
+            f"{label}: expected failure but exit=0\n"
+            f"cmd={' '.join(args)}\n"
+            f"stdout:\n{proc.stdout}\n"
+            f"stderr:\n{proc.stderr}"
+        )
+        return proc
+
+    haystack = f"{proc.stdout}\n{proc.stderr}"
+    if expected_tokens:
+        missing = [token for token in expected_tokens if token not in haystack]
+        if missing:
+            result.error(f"{label}: expected failure output missing tokens {missing}")
+    result.note(f"{label}: expected-fail ok")
+    return proc
+
+
+def run_cmd_allow_codes(
+    label: str,
+    args: list[str],
+    result: SmokeResult,
+    allowed_codes: set[int],
+    cwd: Path = ROOT_DIR,
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(
+        args,
+        cwd=str(cwd),
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode not in allowed_codes:
+        result.error(
+            f"{label}: exit={proc.returncode}, expected one of {sorted(allowed_codes)}\n"
+            f"cmd={' '.join(args)}\n"
+            f"stdout:\n{proc.stdout}\n"
+            f"stderr:\n{proc.stderr}"
+        )
+    else:
+        suffix = "" if proc.returncode == 0 else f" (exit={proc.returncode})"
+        result.note(f"{label}: ok{suffix}")
+    return proc
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
-def build_content_page_fixture() -> dict[str, object]:
-    """Build a minimal content page planning fixture for smoke testing."""
+def make_card(
+    slide_number: int,
+    role: str,
+    index: int,
+    headline: str,
+    body: list[str],
+    card_type: str,
+    card_style: str,
+    body_max_lines: int,
+    chart_type: str | None = None,
+) -> dict[str, object]:
+    card_id = f"s{slide_number:02d}-{role}-{index}"
+    payload: dict[str, object] = {
+        "card_id": card_id,
+        "role": role,
+        "card_type": card_type,
+        "card_style": card_style,
+        "argument_role": "claim" if role == "anchor" else "evidence",
+        "headline": headline,
+        "body": body,
+        "data_points": [],
+        "content_budget": {
+            "headline_max_chars": 12,
+            "body_max_bullets": min(3, max(1, len(body))),
+            "body_max_lines": body_max_lines,
+        },
+        "image": {
+            "mode": "decorate",
+            "needed": False,
+            "usage": None,
+            "placement": None,
+            "content_description": None,
+            "source_hint": None,
+            "decorate_brief": "只用内部装饰，不引入外部图片。",
+        },
+    }
+    if chart_type:
+        payload["chart"] = {"chart_type": chart_type}
+        payload["data_points"] = [
+            {"label": headline, "value": str(20 + index * 7), "unit": "%", "source": f"smoke-source-{index}"}
+        ]
+        payload["resource_ref"] = {"chart": chart_type.replace("_", "-"), "principle": "visual-hierarchy"}
+    else:
+        payload["resource_ref"] = {"principle": "composition"}
+    return payload
+
+
+def build_content_page_fixture(
+    *,
+    slide_number: int = 3,
+    deck_bias: str = "balanced",
+    density_label: str = "medium",
+) -> dict[str, object]:
+    """Build a content page planning fixture for density smoke tests."""
+    defaults = copy.deepcopy(DENSITY_DEFAULTS[density_label])
+    lower_bound, upper_bound = BIAS_BOUNDS[deck_bias]
+    base_cards = {
+        "low": [
+            make_card(slide_number, "anchor", 1, "一句判断", ["先给出核心判断"], "data_highlight", "accent", 3, "kpi"),
+            make_card(slide_number, "support", 1, "一句解释", ["只补一层解释"], "text", "outline", 3),
+        ],
+        "mid_low": [
+            make_card(slide_number, "anchor", 1, "判断先行", ["先说结论，再补解释"], "data_highlight", "accent", 4, "kpi"),
+            make_card(slide_number, "support", 1, "证据一", ["第一组支撑信息"], "data", "outline", 4),
+            make_card(slide_number, "context", 1, "范围说明", ["补充边界与上下文"], "text", "transparent", 4),
+        ],
+        "medium": [
+            make_card(slide_number, "anchor", 1, "核心指标", ["一句解释它为什么重要"], "data_highlight", "accent", 4, "kpi"),
+            make_card(slide_number, "support", 1, "增长原因", ["增长主要来自高客单区域放量"], "data", "outline", 4, "metric_row"),
+            make_card(slide_number, "support", 2, "区域分布", ["北区与华东贡献最高"], "comparison", "filled", 4),
+            make_card(slide_number, "context", 1, "边界条件", ["样本期已排除促销异常"], "text", "transparent", 4),
+        ],
+        "high": [
+            make_card(slide_number, "anchor", 1, "高密结论", ["先看结论，再扫读其余 5 卡"], "data_highlight", "accent", 4, "kpi"),
+            make_card(slide_number, "support", 1, "渠道", ["直营增长更稳"], "data", "outline", 4, "metric_row"),
+            make_card(slide_number, "support", 2, "区域", ["东区拉动明显"], "data", "filled", 4),
+            make_card(slide_number, "support", 3, "客群", ["老客复购抬升"], "comparison", "outline", 4),
+            make_card(slide_number, "context", 1, "节奏", ["增长发生在两个阶段"], "timeline", "transparent", 4),
+            make_card(slide_number, "context", 2, "风险", ["高客单区需继续验证"], "text", "glass", 4),
+        ],
+        "dashboard": [
+            make_card(slide_number, "anchor", 1, "总览", ["整页以扫读为主，不做大图"], "data_highlight", "accent", 3, "kpi"),
+            make_card(slide_number, "support", 1, "营收", ["营收抬升"], "data", "outline", 3, "metric_row"),
+            make_card(slide_number, "support", 2, "转化", ["转化改善"], "data", "filled", 3, "progress_bar"),
+            make_card(slide_number, "support", 3, "结构", ["结构更健康"], "comparison", "glass", 3, "comparison_bar"),
+            make_card(slide_number, "support", 4, "客群", ["新客占比抬升"], "data", "outline", 3),
+            make_card(slide_number, "context", 1, "地区", ["东区领先"], "text", "transparent", 3),
+            make_card(slide_number, "context", 2, "阶段", ["第二阶段最强"], "timeline", "transparent", 3),
+            make_card(slide_number, "context", 3, "提醒", ["仍需防止误读"], "quote", "outline", 3),
+        ],
+    }
+    layout_hint = "mixed-grid" if density_label == "dashboard" else ("hero-top" if density_label in {"low", "medium"} else "asymmetric" if density_label == "mid_low" else "t-shape")
+    chart_refs = sorted(
+        {
+            str(card.get("chart", {}).get("chart_type", "")).replace("_", "-")
+            for card in base_cards[density_label]
+            if isinstance(card.get("chart"), dict) and card["chart"].get("chart_type")
+        }
+    )
     return {
         "page": {
-            "slide_number": 3,
+            "slide_number": slide_number,
             "page_type": "content",
             "narrative_role": "evidence",
-            "title": "增长判断",
-            "page_goal": "证明增长成立",
-            "audience_takeaway": "增长数据可信",
-            "visual_weight": 7,
-            "layout_hint": "hero-top",
-            "layout_variation_note": "与上一页重心不同",
-            "focus_zone": "右上 1/3 作为视觉锚点",
-            "negative_space_target": "medium",
-            "page_text_strategy": "标题强、正文短、数据做锚点",
+            "title": f"{density_label} smoke",
+            "page_goal": f"验证 {density_label} 密度合同",
+            "audience_takeaway": f"{density_label} page passes planning gate",
+            "visual_weight": {"low": 4, "mid_low": 5, "medium": 7, "high": 8, "dashboard": 9}[density_label],
+            "density_label": density_label,
+            "density_reason": f"作为 {deck_bias} deck 的 {density_label} 示例页，验证页级预算与窗口绑定。",
+            "density_contract": {
+                "deck_bias": deck_bias,
+                "page_lower_bound": lower_bound,
+                "page_upper_bound": upper_bound,
+                **defaults,
+            },
+            "layout_hint": layout_hint,
+            "layout_variation_note": f"用于验证 {deck_bias} -> {density_label} 的固定施工模式。",
+            "focus_zone": "中心偏上" if density_label in {"low", "medium"} else "网格核心区",
+            "negative_space_target": "high" if density_label == "low" else "medium" if density_label in {"mid_low", "medium"} else "low",
+            "page_text_strategy": "短句化、先结论再证据",
             "rhythm_action": "推进",
-            "must_avoid": ["禁止平均分栏"],
+            "must_avoid": ["禁止把导演指令渲染成正文"],
             "variation_guardrails": {
-                "same_gene_as_deck": "保留统一字体和 signature_move",
-                "different_from_previous": ["重心从上移到右"],
+                "same_gene_as_deck": "统一字体与强调色",
+                "different_from_previous": [f"验证 {density_label} 专属预算与骨架"],
             },
             "director_command": {
-                "mood": "判断感强、结论先行",
-                "spatial_strategy": "主锚占据第一视线",
-                "anchor_treatment": "用尺度断层强化主锚",
+                "mood": f"{density_label} 密度冒烟页",
+                "spatial_strategy": "主锚先读，其余卡片次序清晰",
+                "anchor_treatment": "只保留一个主锚点",
                 "techniques": ["T1", "W3"],
-                "prose": "保持证据链清晰",
+                "prose": "先结论后扫读，结构稳定优先。",
             },
             "decoration_hints": {
-                "background": {"feel": "轻微渐变底", "restraint": "不抢文字对比", "techniques": ["T1"]},
-                "floating": {"feel": "局部辅助装饰", "restraint": "只服务锚点动线", "techniques": ["W3"]},
-                "page_accent": {"feel": "强调色集中在锚点附近", "restraint": "accent 只用 1-2 种", "techniques": ["T9"]},
+                "background": {"feel": "克制背景", "restraint": "不抢正文", "techniques": ["T1"]},
+                "floating": {"feel": "轻量装饰", "restraint": "只服务动线", "techniques": ["W3"] if density_label in {"low", "mid_low", "medium"} else []},
+                "page_accent": {"feel": "强调色聚焦锚点", "restraint": "不超过 2 个亮点", "techniques": ["T9"]},
             },
             "source_guidance": {
                 "brief_sections": ["核心发现"],
@@ -121,62 +298,13 @@ def build_content_page_fixture() -> dict[str, object]:
             },
             "resources": {
                 "page_template": None,
-                "layout_refs": ["hero-top"],
+                "layout_refs": [layout_hint],
                 "block_refs": [],
-                "chart_refs": ["kpi", "metric-row"],
+                "chart_refs": chart_refs,
                 "principle_refs": ["visual-hierarchy", "composition"],
-                "resource_rationale": "用 hero-top 放大单一结论",
+                "resource_rationale": f"验证 {density_label} 密度页的布局与预算合同。",
             },
-            "cards": [
-                {
-                    "card_id": "s03-anchor",
-                    "role": "anchor",
-                    "card_type": "data_highlight",
-                    "card_style": "accent",
-                    "argument_role": "claim",
-                    "headline": "核心指标",
-                    "body": ["一句解释它为什么重要"],
-                    "data_points": [
-                        {"label": "同比增长", "value": "47.3", "unit": "%", "source": "search-brief metrics[2]"}
-                    ],
-                    "chart": {"chart_type": "kpi"},
-                    "content_budget": {"headline_max_chars": 12, "body_max_bullets": 2, "body_max_lines": 4},
-                    "image": {
-                        "mode": "decorate",
-                        "needed": False,
-                        "usage": None,
-                        "placement": None,
-                        "content_description": None,
-                        "source_hint": None,
-                        "decorate_brief": "用内联 SVG 装饰填满留白",
-                    },
-                    "resource_ref": {"chart": "kpi", "principle": "visual-hierarchy"},
-                },
-                {
-                    "card_id": "s03-support-1",
-                    "role": "support",
-                    "card_type": "data",
-                    "card_style": "outline",
-                    "argument_role": "evidence",
-                    "headline": "增长原因",
-                    "body": ["增长主要来自高客单区域放量"],
-                    "data_points": [
-                        {"label": "高客单区域占比", "value": "31", "unit": "%", "source": "search-brief metrics[4]"}
-                    ],
-                    "chart": {"chart_type": "metric_row"},
-                    "content_budget": {"headline_max_chars": 12, "body_max_bullets": 2, "body_max_lines": 4},
-                    "image": {
-                        "mode": "decorate",
-                        "needed": False,
-                        "usage": None,
-                        "placement": None,
-                        "content_description": None,
-                        "source_hint": None,
-                        "decorate_brief": "用低对比度辅助线承托信息",
-                    },
-                    "resource_ref": {"chart": "metric-row", "principle": "composition"},
-                },
-            ],
+            "cards": base_cards[density_label],
             "workflow_metadata": {
                 "stage": "planning",
                 "workflow_version": WORKFLOW_VERSION,
@@ -186,6 +314,271 @@ def build_content_page_fixture() -> dict[str, object]:
             },
         }
     }
+
+
+def build_outline_fixture(density_bias: str) -> str:
+    if density_bias == "relaxed":
+        curve = "low -> medium -> high -> mid_low"
+        pages = [
+            ("1", "封面", "cover", "low", "low", "mid_low", "铺垫", "呼吸页", "标题"),
+            ("2", "背景判断", "content", "low", "medium", "medium", "推进", "证据页", "KPI"),
+            ("3", "高潮论证", "content", "medium", "high", "high", "爆发", "证据页", "KPI"),
+            ("4", "收束", "end", "mid_low", "mid_low", "medium", "收束", "结论页", "标题"),
+        ]
+    elif density_bias == "ultra_dense":
+        curve = "medium -> medium -> dashboard -> medium -> high"
+        pages = [
+            ("1", "封面", "cover", "medium", "medium", "high", "铺垫", "呼吸页", "标题"),
+            ("2", "总览", "content", "medium", "medium", "high", "推进", "证据页", "KPI"),
+            ("3", "仪表盘", "content", "high", "dashboard", "dashboard", "爆发", "仪表盘页", "表格"),
+            ("4", "缓冲", "content", "medium", "medium", "high", "缓冲", "证据页", "表格"),
+            ("5", "收束", "end", "medium", "high", "high", "收束", "结论页", "标题"),
+        ]
+    else:
+        curve = "mid_low -> medium -> high -> mid_low"
+        pages = [
+            ("1", "封面", "cover", "mid_low", "mid_low", "medium", "铺垫", "呼吸页", "标题"),
+            ("2", "背景判断", "content", "mid_low", "medium", "high", "推进", "证据页", "KPI"),
+            ("3", "增长判断", "content", "mid_low", "high", "high", "爆发", "证据页", "KPI"),
+            ("4", "收束", "end", "mid_low", "mid_low", "medium", "收束", "结论页", "标题"),
+        ]
+    lines = [
+        "# 大纲",
+        "核心论点：社区价值成立",
+        "叙事结构：是什么->为什么->怎么做",
+        f"密度倾向：{density_bias}",
+        f"密度曲线：{curve}",
+        f"总页数：{len(pages)}",
+        "",
+        "---",
+        "",
+        "## Part 1: Demo",
+        "Part 目标：验证密度曲线",
+        "论证策略：data_driven",
+        "与上一 Part 的关系：无（首Part）",
+        "",
+    ]
+    for page_no, title, page_type, lower, target, upper, rhythm, posture, anchor in pages:
+        lines.extend(
+            [
+                f"### 第 {page_no} 页：{title}",
+                f"- 页目标：验证 {title}",
+                "- 叙事角色：evidence",
+                f"- 页面类型映射：{page_type}",
+                f"- 密度下限：{lower}",
+                f"- 密度目标：{target}",
+                f"- 密度上限：{upper}",
+                f"- 节奏动作：{rhythm}",
+                f"- 信息姿态：{posture}",
+                f"- 锚点类型：{anchor}",
+                "- 论证方式：数据驱动",
+                "- 内容支撑：用示例内容验证合同",
+                "- 素材来源：found_in_brief: true",
+                "",
+            ]
+        )
+    lines.extend(["---", "SELF_REVIEW_PASS", "自审轮数：1", "自审时间：2026-04-09 12:00", ""])
+    return "\n".join(lines)
+
+
+def build_html_fixture(
+    page_payload: dict[str, object],
+    *,
+    decoration_count: int,
+    font_px: int | None = None,
+    include_img: bool = False,
+    include_bg_url: bool = False,
+    omit_header: bool = False,
+    omit_footer: bool = False,
+    decoration_aria_hidden: bool = True,
+) -> str:
+    page = page_payload["page"] if "page" in page_payload else page_payload
+    assert isinstance(page, dict)
+    density_contract = page.get("density_contract", {})
+    min_font = int(density_contract.get("min_body_font_px", 18)) if isinstance(density_contract, dict) else 18
+    body_font = font_px or max(min_font, 18)
+    title = str(page.get("title", "Smoke"))
+    cards = [card for card in page.get("cards", []) if isinstance(card, dict)]
+    decoration_layers = ["background", "floating", "page-accent"]
+
+    decoration_parts = []
+    for index in range(decoration_count):
+        layer = decoration_layers[index % len(decoration_layers)]
+        aria_attr = ' aria-hidden="true"' if decoration_aria_hidden else ""
+        decoration_parts.append(
+            f'<div class="decor decor-{index + 1}" data-decoration-layer="{layer}"{aria_attr}></div>'
+        )
+
+    card_parts = []
+    for index, card in enumerate(cards, start=1):
+        role = str(card.get("role") or "support")
+        body_lines = "".join(f"<li>{item}</li>" for item in card.get("body", []) if isinstance(item, str))
+        chart_markup = ""
+        chart = card.get("chart")
+        if isinstance(chart, dict) and chart.get("chart_type"):
+            chart_markup = f'<div class="chart">{chart["chart_type"]}</div>'
+        card_parts.append(
+            "\n".join(
+                [
+                    f'<section class="card {role}" data-card-id="{card["card_id"]}">',
+                    f'  <h3>{card.get("headline", f"card-{index}")}</h3>',
+                    f'  <ul>{body_lines or "<li>smoke</li>"}</ul>',
+                    f"  {chart_markup}",
+                    "</section>",
+                ]
+            )
+        )
+
+    header_markup = ""
+    footer_markup = ""
+    page_type = str(page.get("page_type") or "").strip().lower()
+    if page_type in {"content", "toc", "section"} and not omit_header:
+        header_markup = '<header class="slide-header"><span class="overline">Smoke</span><h1 class="page-title">测试页</h1></header>'
+    if page_type in {"content", "toc", "section"} and not omit_footer:
+        footer_markup = '<footer class="slide-footer"><span>01</span><span>smoke</span></footer>'
+    img_markup = '<img class="hero-shot" src="../images/smoke-image.svg" alt="smoke" />' if include_img else ""
+    bg_style = "background-image:url(../images/smoke-image.svg);" if include_bg_url else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>{title}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{
+      width: 1280px;
+      height: 720px;
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Noto Sans SC', sans-serif;
+      color: #f8fafc;
+      background: linear-gradient(135deg, #0f172a, #111827);
+    }}
+    .stage {{
+      position: relative;
+      width: 1280px;
+      height: 720px;
+      padding: 88px 56px 56px;
+      {bg_style}
+    }}
+    .slide-header, .slide-footer {{
+      position: absolute;
+      left: 40px;
+      right: 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 20;
+    }}
+    .slide-header {{ top: 20px; }}
+    .slide-footer {{ bottom: 12px; font-size: {max(min_font, 14)}px; color: #cbd5e1; }}
+    .cards {{
+      position: relative;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }}
+    .card {{
+      min-height: 150px;
+      padding: 20px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 24px;
+      background: rgba(15, 23, 42, 0.62);
+      backdrop-filter: blur(8px);
+      font-size: {body_font}px;
+      line-height: 1.55;
+    }}
+    .card.anchor {{
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+    }}
+    .card h3 {{ margin: 0 0 10px; font-size: {max(body_font + 10, 24)}px; line-height: 1.2; }}
+    .card ul {{ margin: 0; padding-left: 18px; }}
+    .chart {{
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(148, 163, 184, 0.25);
+      color: #38bdf8;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }}
+    .decor {{
+      position: absolute;
+      z-index: 1;
+      pointer-events: none;
+      border-radius: 999px;
+      opacity: 0.18;
+      filter: blur(2px);
+    }}
+    .decor-1 {{ width: 280px; height: 280px; top: -30px; right: 60px; background: #38bdf8; }}
+    .decor-2 {{ width: 180px; height: 180px; bottom: 80px; right: 120px; background: #22c55e; }}
+    .decor-3 {{ width: 140px; height: 140px; top: 260px; left: 24px; background: #a78bfa; }}
+    .decor-4 {{ width: 120px; height: 120px; bottom: 120px; left: 420px; background: #f59e0b; }}
+    .decor-5 {{ width: 96px; height: 96px; top: 140px; right: 360px; background: #38bdf8; }}
+    .hero-shot {{
+      position: absolute;
+      right: 56px;
+      bottom: 72px;
+      width: 180px;
+      height: 120px;
+      border-radius: 16px;
+      object-fit: cover;
+      z-index: 8;
+    }}
+  </style>
+</head>
+<body>
+  <div class="stage">
+    {header_markup}
+    {''.join(decoration_parts)}
+    <main class="cards">
+      {''.join(card_parts)}
+    </main>
+    {img_markup}
+    {footer_markup}
+  </div>
+</body>
+</html>
+"""
+
+
+def write_smoke_png(path: Path) -> None:
+    if Image is None or ImageDraw is None:
+        raise RuntimeError("Pillow is required for smoke PNG generation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (1280, 720), "#0f172a")
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle((34, 20, 1246, 84), radius=18, outline="#38bdf8", width=2)
+    draw.text((60, 38), "Smoke Header", fill="#f8fafc")
+    draw.rounded_rectangle((56, 116, 650, 356), radius=28, fill="#111827", outline="#38bdf8", width=3)
+    draw.rounded_rectangle((678, 116, 1224, 270), radius=24, fill="#1e293b", outline="#22c55e", width=2)
+    draw.rounded_rectangle((678, 292, 1224, 518), radius=24, fill="#172033", outline="#a78bfa", width=2)
+    draw.rounded_rectangle((56, 388, 650, 620), radius=24, fill="#172033", outline="#f59e0b", width=2)
+    draw.rounded_rectangle((678, 546, 1224, 650), radius=18, fill="#0b1220", outline="#38bdf8", width=2)
+    for x in range(0, 1280, 16):
+        for y in range(0, 720, 16):
+            color = (
+                10 + (x // 16 * 5) % 36,
+                18 + (y // 16 * 7) % 44,
+                28 + ((x + y) // 16 * 9) % 56,
+            )
+            draw.rectangle((x, y, x + 7, y + 7), fill=color)
+    draw.ellipse((910, -20, 1180, 250), fill="#12324b")
+    draw.ellipse((930, 0, 1150, 220), fill="#1d4f73")
+    for y in range(140, 600, 26):
+        draw.line((94, y, 610, y), fill="#cbd5e1", width=2)
+    for y in range(146, 250, 22):
+        draw.line((716, y, 1180, y), fill="#cbd5e1", width=2)
+    for x in (736, 862, 988, 1114):
+        draw.rectangle((x, 360, x + 72, 480), fill="#38bdf8")
+    draw.text((92, 140), "Anchor KPI", fill="#f8fafc")
+    draw.rounded_rectangle((718, 138, 1172, 168), radius=12, fill="#cbd5e1")
+    draw.rounded_rectangle((718, 314, 1120, 344), radius=12, fill="#cbd5e1")
+    draw.text((92, 412), "Evidence Notes", fill="#f8fafc")
+    draw.text((1110, 672), "01", fill="#cbd5e1")
+    img.save(path)
 
 
 def assert_contains(label: str, haystack: str, needles: list[str], result: SmokeResult) -> None:
@@ -215,7 +608,21 @@ def build_non_content_page(page_type: str) -> dict[str, object]:
             "title": f"Smoke {page_type}",
             "page_goal": f"验证 {page_type} 页面模板路由",
             "audience_takeaway": f"{page_type} page template resolve",
-            "visual_weight": 7,
+            "visual_weight": 5,
+            "density_label": "mid_low",
+            "density_reason": "非 content 页只验证模板路由，保持克制密度。",
+            "density_contract": {
+                "deck_bias": "balanced",
+                "page_lower_bound": "low",
+                "page_upper_bound": "medium",
+                "max_cards": 3,
+                "max_charts": 1,
+                "min_body_font_px": 20,
+                "max_lines_per_card": 4,
+                "image_policy": "flexible",
+                "decoration_budget": "medium",
+                "overflow_strategy": "rebalance_layout",
+            },
             "focus_zone": "center",
             "negative_space_target": "medium",
             "page_text_strategy": "短句为主",
@@ -293,6 +700,8 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         "prompt_interview_structured": tmp_dir / "runtime/prompt-interview-structured.md",
         "prompt_interview_text": tmp_dir / "runtime/prompt-interview-text.md",
         "prompt_style_phase1": tmp_dir / "runtime/prompt-style-phase1.md",
+        "page_agent_log": tmp_dir / "runtime/page-agent-3.log",
+        "page_patch_log": tmp_dir / "runtime/page-patch-agent-3.log",
         "planning_copy": tmp_dir / "runtime/page-planning-output-3.json",
         "planning_validator_report": tmp_dir / "runtime/page-planning-validator-3.json",
         "resource_menu": tmp_dir / "runtime/page-planning-menu-3.md",
@@ -324,9 +733,9 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         "must_include: 社区定位、氛围、价值、加入理由\nmust_avoid: 不要写成广告页\nlanguage: 中文\n"
         "imagery: decorate\nmaterial_strategy: research\nsubagent_model_strategy: 继承主代理\n"
         "subagent_thinking_effort: 中等\nmanual_audit_mode: fine_grained\nmanual_audit_scope: page_html, page_review\n"
-        "manual_audit_assets: runtime_and_selected_assets\nbranch: research\n",
+        "manual_audit_assets: runtime_and_selected_assets\ndensity_bias: balanced\nbranch: research\n",
     )
-    write_text(fixtures["outline"], "# 大纲\n\n## Part 1: Demo\n\n### 第 3 页：增长判断\n- 页目标：增长成立\n")
+    write_text(fixtures["outline"], build_outline_fixture("balanced"))
     write_text(fixtures["brief"], "# Research Brief\n\n## 核心发现\n1. 示例发现 [来源: smoke]\n")
     write_text(
         fixtures["style"],
@@ -344,19 +753,18 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
                 },
                 "font_family": "Noto Sans SC",
                 "css_variables": {
-                    "--bg-primary": "#0f172a",
-                    "--bg-secondary": "#111827",
-                    "--card-bg-from": "#1f2937",
-                    "--card-bg-to": "#111827",
-                    "--card-border": "#334155",
-                    "--card-radius": "24px",
-                    "--text-primary": "#f8fafc",
-                    "--text-secondary": "#cbd5e1",
-                    "--accent-1": "#38bdf8",
-                    "--accent-2": "#22c55e",
-                    "--accent-3": "#f59e0b",
-                    "--accent-4": "#a78bfa",
-                    "--font-primary": "Noto Sans SC",
+                    "bg_primary": "#0f172a",
+                    "bg_secondary": "#111827",
+                    "card_bg_from": "#1f2937",
+                    "card_bg_to": "#111827",
+                    "card_border": "#334155",
+                    "card_radius": "24px",
+                    "text_primary": "#f8fafc",
+                    "text_secondary": "#cbd5e1",
+                    "accent_1": "#38bdf8",
+                    "accent_2": "#22c55e",
+                    "accent_3": "#f59e0b",
+                    "accent_4": "#a78bfa",
                 },
             },
             ensure_ascii=False,
@@ -368,8 +776,10 @@ def build_fixture_tree(tmp_dir: Path) -> dict[str, Path]:
         fixtures["images"] / "smoke-image.svg",
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"240\"><rect width=\"400\" height=\"240\" fill=\"#0f172a\"/><circle cx=\"140\" cy=\"120\" r=\"52\" fill=\"#38bdf8\" opacity=\"0.7\"/><text x=\"210\" y=\"130\" fill=\"#f8fafc\" font-size=\"36\">smoke</text></svg>",
     )
-    write_text(fixtures["planning"], json.dumps(build_content_page_fixture(), ensure_ascii=False, indent=2))
-    write_text(fixtures["slide"], "<html><body>smoke</body></html>")
+    content_fixture = build_content_page_fixture()
+    write_text(fixtures["planning"], json.dumps(content_fixture, ensure_ascii=False, indent=2))
+    write_text(fixtures["slide"], build_html_fixture(content_fixture, decoration_count=2))
+    write_smoke_png(fixtures["png"])
     write_text(fixtures["review_png_copy"], "placeholder png mirror")
     write_text(fixtures["visual_qa_report"], "placeholder qa report")
     return fixtures
@@ -408,6 +818,35 @@ def run_smoke() -> SmokeResult:
         if requirements_contract.returncode == 0:
             assert_contains("contract-validator-requirements", requirements_contract.stdout, ["OK"], result)
 
+        outline_contract = run_cmd(
+            "contract-validator-outline",
+            [
+                py,
+                str(SCRIPTS_DIR / "contract_validator.py"),
+                "outline",
+                str(fx["outline"]),
+            ],
+            result,
+        )
+        if outline_contract.returncode == 0:
+            assert_contains("contract-validator-outline", outline_contract.stdout, ["OK"], result)
+
+        for bias in ("relaxed", "ultra_dense"):
+            outline_path = tmp_dir / f"outline-{bias}.txt"
+            write_text(outline_path, build_outline_fixture(bias))
+            outline_variant = run_cmd(
+                f"contract-validator-outline-{bias}",
+                [
+                    py,
+                    str(SCRIPTS_DIR / "contract_validator.py"),
+                    "outline",
+                    str(outline_path),
+                ],
+                result,
+            )
+            if outline_variant.returncode == 0:
+                assert_contains(f"contract-validator-outline-{bias}", outline_variant.stdout, ["OK"], result)
+
         validator = run_cmd(
             "planning-validator",
             [
@@ -431,6 +870,162 @@ def run_smoke() -> SmokeResult:
                 ['"ok": true', '"total_pages": 1'],
                 result,
             )
+
+        density_cases = [
+            ("planning-validator-low", 1, "relaxed", "low"),
+            ("planning-validator-mid-low", 2, "balanced", "mid_low"),
+            ("planning-validator-high", 4, "ultra_dense", "high"),
+        ]
+        for label, slide_no, deck_bias, density_label in density_cases:
+            planning_dir = tmp_dir / f"{label}-dir"
+            planning_path = planning_dir / f"planning{slide_no}.json"
+            write_text(
+                planning_path,
+                json.dumps(
+                    build_content_page_fixture(slide_number=slide_no, deck_bias=deck_bias, density_label=density_label),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+            density_validate = run_cmd(
+                label,
+                [
+                    py,
+                    str(SCRIPTS_DIR / "planning_validator.py"),
+                    str(planning_dir),
+                    "--refs",
+                    str(REFERENCES_DIR),
+                    "--page",
+                    str(slide_no),
+                ],
+                result,
+            )
+            if density_validate.returncode == 0:
+                assert_contains(label, density_validate.stdout, ["OK"], result)
+
+        dashboard_dir = tmp_dir / "planning-validator-dashboard-dir"
+        dashboard_sequence = {
+            4: build_content_page_fixture(slide_number=4, deck_bias="ultra_dense", density_label="medium"),
+            5: build_content_page_fixture(slide_number=5, deck_bias="ultra_dense", density_label="dashboard"),
+            6: build_content_page_fixture(slide_number=6, deck_bias="ultra_dense", density_label="medium"),
+        }
+        for slide_no, payload in dashboard_sequence.items():
+            write_text(
+                dashboard_dir / f"planning{slide_no}.json",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+        dashboard_validate = run_cmd(
+            "planning-validator-dashboard",
+            [
+                py,
+                str(SCRIPTS_DIR / "planning_validator.py"),
+                str(dashboard_dir),
+                "--refs",
+                str(REFERENCES_DIR),
+            ],
+            result,
+        )
+        if dashboard_validate.returncode == 0:
+            assert_contains("planning-validator-dashboard", dashboard_validate.stdout, ["OK"], result)
+
+        visual_qa = run_cmd_allow_codes(
+            "visual-qa-pass",
+            [
+                py,
+                str(SCRIPTS_DIR / "visual_qa.py"),
+                str(fx["png"]),
+                "--planning",
+                str(fx["planning"]),
+                "--html",
+                str(fx["slide"]),
+                "--output",
+                str(fx["visual_qa_report"]),
+            ],
+            result,
+            allowed_codes={0, 2},
+        )
+        if visual_qa.returncode in {0, 2}:
+            report_text = fx["visual_qa_report"].read_text(encoding="utf-8")
+            assert_contains("visual-qa-pass", report_text, ["HTML-07", "HTML-08", "DENS-01", "HTML-03", "FAIL=0"], result)
+
+        multi_anchor_dir = tmp_dir / "planning-multi-anchor"
+        multi_anchor_path = multi_anchor_dir / "planning6.json"
+        multi_anchor_fixture = build_content_page_fixture(slide_number=6, deck_bias="balanced", density_label="medium")
+        multi_anchor_fixture["page"]["cards"][1]["role"] = "anchor"
+        write_text(multi_anchor_path, json.dumps(multi_anchor_fixture, ensure_ascii=False, indent=2))
+        run_cmd_expect_failure(
+            "planning-validator-multi-anchor-fail",
+            [
+                py,
+                str(SCRIPTS_DIR / "planning_validator.py"),
+                str(multi_anchor_dir),
+                "--refs",
+                str(REFERENCES_DIR),
+                "--page",
+                "6",
+            ],
+            result,
+            expected_tokens=["multiple anchor cards"],
+        )
+
+        high_dir = tmp_dir / "planning-high-decor"
+        high_path = high_dir / "planning7.json"
+        high_fixture = build_content_page_fixture(slide_number=7, deck_bias="ultra_dense", density_label="high")
+        high_html = tmp_dir / "slides/slide-7.html"
+        write_text(high_path, json.dumps(high_fixture, ensure_ascii=False, indent=2))
+        write_text(high_html, build_html_fixture(high_fixture, decoration_count=3))
+        run_cmd_expect_failure(
+            "visual-qa-decoration-budget-fail",
+            [
+                py,
+                str(SCRIPTS_DIR / "visual_qa.py"),
+                str(fx["png"]),
+                "--planning",
+                str(high_path),
+                "--html",
+                str(high_html),
+            ],
+            result,
+            expected_tokens=["HTML-07"],
+        )
+
+        dashboard_html_dir = tmp_dir / "planning-dashboard-bad-html"
+        dashboard_path = dashboard_html_dir / "planning8.json"
+        dashboard_fixture = build_content_page_fixture(slide_number=8, deck_bias="ultra_dense", density_label="dashboard")
+        dashboard_html = tmp_dir / "slides/slide-8.html"
+        write_text(dashboard_path, json.dumps(dashboard_fixture, ensure_ascii=False, indent=2))
+        write_text(dashboard_html, build_html_fixture(dashboard_fixture, decoration_count=1, include_img=True))
+        run_cmd_expect_failure(
+            "visual-qa-dashboard-image-fail",
+            [
+                py,
+                str(SCRIPTS_DIR / "visual_qa.py"),
+                str(fx["png"]),
+                "--planning",
+                str(dashboard_path),
+                "--html",
+                str(dashboard_html),
+            ],
+            result,
+            expected_tokens=["HTML-04"],
+        )
+
+        small_font_html = tmp_dir / "slides/slide-9.html"
+        write_text(small_font_html, build_html_fixture(build_content_page_fixture(), decoration_count=2, font_px=10))
+        run_cmd_expect_failure(
+            "visual-qa-small-font-fail",
+            [
+                py,
+                str(SCRIPTS_DIR / "visual_qa.py"),
+                str(fx["png"]),
+                "--planning",
+                str(fx["planning"]),
+                "--html",
+                str(small_font_html),
+            ],
+            result,
+            expected_tokens=["HTML-06"],
+        )
 
         menu = run_cmd(
             "resource-loader-menu",
@@ -548,6 +1143,40 @@ def run_smoke() -> SmokeResult:
         )
         if images.returncode == 0:
             assert_contains("resource-loader-images", images.stdout, ["count: 1", "smoke-image.svg"], result)
+
+        subagent_logger = run_cmd(
+            "subagent-logger-run",
+            [
+                py,
+                str(SCRIPTS_DIR / "subagent_logger.py"),
+                "run",
+                "--log",
+                str(fx["page_agent_log"]),
+                "--label",
+                "resource-loader-images",
+                "--",
+                py,
+                str(SCRIPTS_DIR / "resource_loader.py"),
+                "images",
+                "--images-dir",
+                str(fx["images"]),
+            ],
+            result,
+        )
+        if subagent_logger.returncode == 0:
+            logger_text = fx["page_agent_log"].read_text(encoding="utf-8")
+            assert_contains(
+                "subagent-logger-run",
+                logger_text,
+                [
+                    "label: resource-loader-images",
+                    "cmd:",
+                    "stdout:",
+                    "count: 1",
+                    "smoke-image.svg",
+                ],
+                result,
+            )
 
         for page_type, expected_title in PAGE_TEMPLATE_EXPECTATIONS.items():
             planning_dir = tmp_dir / f"planning-{page_type}"
@@ -686,6 +1315,10 @@ def run_smoke() -> SmokeResult:
                     "--var",
                     f"PLANNING_OUTPUT={fx['planning']}",
                     "--var",
+                    f"SUBAGENT_LOG_PATH={fx['page_agent_log']}",
+                    "--var",
+                    "SUBAGENT_NAME=PageAgent-3",
+                    "--var",
                     f"SKILL_DIR={ROOT_DIR}",
                     "--var",
                     f"REFS_DIR={REFERENCES_DIR}",
@@ -724,6 +1357,10 @@ def run_smoke() -> SmokeResult:
                     "--var",
                     f"STYLE_PATH={fx['style']}",
                     "--var",
+                    f"SUBAGENT_LOG_PATH={fx['page_agent_log']}",
+                    "--var",
+                    "SUBAGENT_NAME=PageAgent-3",
+                    "--var",
                     f"SKILL_DIR={ROOT_DIR}",
                     "--var",
                     f"REFS_DIR={REFERENCES_DIR}",
@@ -757,6 +1394,10 @@ def run_smoke() -> SmokeResult:
                     f"VISUAL_QA_REPORT_PATH={fx['visual_qa_report']}",
                     "--var",
                     f"STYLE_PATH={fx['style']}",
+                    "--var",
+                    f"SUBAGENT_LOG_PATH={fx['page_agent_log']}",
+                    "--var",
+                    "SUBAGENT_NAME=PageAgent-3",
                     "--var",
                     f"SKILL_DIR={ROOT_DIR}",
                     "--var",
@@ -825,6 +1466,12 @@ def run_smoke() -> SmokeResult:
                     f"SLIDE_OUTPUT={fx['slide']}",
                     "--var",
                     f"PNG_OUTPUT={fx['png']}",
+                    "--var",
+                    f"SUBAGENT_LOG_PATH={fx['page_agent_log']}",
+                    "--var",
+                    "SUBAGENT_NAME=PageAgent-3",
+                    "--var",
+                    f"SKILL_DIR={ROOT_DIR}",
                     "--output",
                     str(fx["prompt_orchestrator"]),
                 ],
@@ -859,6 +1506,12 @@ def run_smoke() -> SmokeResult:
                     f"SLIDE_OUTPUT={fx['slide']}",
                     "--var",
                     f"PNG_OUTPUT={fx['png']}",
+                    "--var",
+                    f"SUBAGENT_LOG_PATH={fx['page_patch_log']}",
+                    "--var",
+                    "SUBAGENT_NAME=PagePatchAgent-3",
+                    "--var",
+                    f"SKILL_DIR={ROOT_DIR}",
                     "--var",
                     "TARGET_ASSET_PATH=none",
                     "--var",
@@ -928,6 +1581,8 @@ def run_smoke() -> SmokeResult:
                             "主链已生成的**组件/图表菜单快照**",
                             str(fx["planning_copy"]),
                             str(fx["planning_validator_report"]),
+                            str(fx["page_agent_log"]),
+                            "scripts/subagent_logger.py run --log",
                         ],
                         result,
                     )
@@ -935,7 +1590,15 @@ def run_smoke() -> SmokeResult:
                     assert_contains(
                         label,
                         rendered,
-                        ["# Page HTML Playbook -- 单页 HTML 设计稿", str(fx["html_resolve"]), str(fx["html_copy"])],
+                        [
+                            "# Page HTML Playbook -- 单页 HTML 设计稿",
+                            str(fx["html_resolve"]),
+                            str(fx["html_copy"]),
+                            "data-decoration-layer",
+                            'aria-hidden="true"',
+                            str(fx["page_agent_log"]),
+                            "scripts/subagent_logger.py run --log",
+                        ],
                         result,
                     )
                 if label == "prompt-page-review":
@@ -947,6 +1610,22 @@ def run_smoke() -> SmokeResult:
                             "# Runtime Failure Modes",
                             str(fx["review_png_copy"]),
                             str(fx["visual_qa_report"]),
+                            "--html",
+                            str(fx["page_agent_log"]),
+                            "scripts/subagent_logger.py run --log",
+                        ],
+                        result,
+                    )
+                if label == "prompt-page-orchestrator":
+                    assert_contains(
+                        label,
+                        rendered,
+                        [
+                            str(fx["page_agent_log"]),
+                            "scripts/subagent_logger.py note --log",
+                            "阶段 1：Planning",
+                            "阶段 2：HTML",
+                            "阶段 3：Review",
                         ],
                         result,
                     )
@@ -971,6 +1650,8 @@ def run_smoke() -> SmokeResult:
                         [
                             "# PagePatchAgent-3 断点返工调度指令",
                             f"先读取：`{fx['audit_request']}`",
+                            str(fx["page_patch_log"]),
+                            "scripts/subagent_logger.py note --log",
                         ],
                         result,
                     )

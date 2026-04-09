@@ -13,6 +13,7 @@
 | 字段 | HTML 阶段的含义 |
 |------|--------------|
 | `page_type` / `layout_hint` | 决定整体骨架与页面自由度 |
+| `density_label` / `density_contract` | 决定本页是高自由度还是低自由度执行模式 |
 | `focus_zone` | 决定哪个卡片/区域应该有最大视觉权重 |
 | `negative_space_target` | 决定留白比例（high=宽松 / medium=适中 / low=密集）|
 | `cards[].role` / `cards[].card_style` | 决定主次顺序与卡片存在感 |
@@ -42,6 +43,17 @@ python3 SKILL_DIR/scripts/resource_loader.py resolve --refs-dir REFS_DIR --plann
 - 允许在极致对齐和还原规划骨架的前提下优化视觉，但不要妄图在此时挑战原本规划好的数据主次。
 - `process` 这类没有独立 block 文件的 card_type，须用坚固的原生 DOM 结构结合严谨的布局技法将其承接，禁止随意破坏既定的阅读动线。
 
+### 密度执行模式（必须服从）
+
+- `low / mid_low`：高自由度，可使用更强的留白、图片和材质变化
+- `medium`：中自由度，允许有设计表达，但不能破坏阅读秩序
+- `high / dashboard`：低自由度，只能做稳态 grid / flex 骨架，优先表格、矩阵、微图表，禁止依赖复杂绝对定位硬塞内容
+
+**特别红线**：
+- `high / dashboard` 禁主视觉大图卡
+- `dashboard` 禁大面积水印、禁装饰抢主阅读路径
+- `density_contract` 是最高施工合同，HTML 不得自行抬高或降低本页密度
+
 ---
 
 ## Phase 3：图片模式严格执行
@@ -52,6 +64,11 @@ python3 SKILL_DIR/scripts/resource_loader.py resolve --refs-dir REFS_DIR --plann
 | `manual_slot` | 渲染明确尺寸的图片占位框（带虚线边框 + 文字说明"[图片替换位]"）| 不得删掉或做成看不出来的空白 |
 | `decorate` | 使用内联 SVG、CSS 渐变、几何色块、大字水印、圆圈装饰等内部视觉语言补足氛围 | 不得留空白大洞，不得放空的 `<div>` |
 
+同时严格服从 `density_contract.image_policy`：
+- `flexible`：可自由选图，但仍须服务 page_goal
+- `support_only`：图片只能做支撑，不得做整页背景大图
+- `decorate_only`：不得渲染外部图片，只能 `decorate`
+
 ---
 
 ## Phase 4：卡片落地对账（强制）
@@ -59,8 +76,10 @@ python3 SKILL_DIR/scripts/resource_loader.py resolve --refs-dir REFS_DIR --plann
 - `planning.cards[]` 中的每一张卡都必须有一个对应的 HTML 根节点。
 - 每个根节点都要带 `data-card-id="<card_id>"`，便于 Review 阶段与 planning 对账。
 - `role = anchor` 的卡必须成为全页第一视觉落点；`support/context` 退后，但不能消失。
+- 任何**纯装饰节点**都必须带 `data-decoration-layer="background|floating|page-accent"`，并同时写 `aria-hidden="true"`；`visual_qa.py` 会直接按这个标记统计装饰预算。
 - 若卡片带 `chart.chart_type`，最终图表类型必须与 planning 保持一致；不要把 `comparison_bar` 偷换成普通 list。
 - 若 `source_guidance` 要求保留来源，至少在卡片 footer / caption / 注释位中给出来源提示。
+- 卡片数量、图表数量、每卡行数都不得超出 `density_contract` 的预算上限。
 - **【反泄漏清扫防线】**：在你把 JSON 里的 `body` 和 `headline` 填入 HTML 标签时，如果读到了明显的**“旁白解说”、“排版动作”**（例如：“这一页先做铺垫，最后收束到结论”等废话），**绝对不准老实巴交地把它渲染在大屏幕上！** 这是前置 Planning 代理漏掉的导演指导语，你必须主动充当最后一道防火墙将其直接剔除，或自行将其改写为干货文案！
 
 ---
@@ -87,6 +106,7 @@ body {
 - **流体坍缩预防**：在高度自由发挥时，`flex` / `grid` 极易出现子项挤压坍缩。凡是重要卡片或必须撑开的区域，务必使用 `min-width`, `min-height` 或 `flex-shrink: 0`。
 - **行高裁剪预防**：文字的 `line-height` 若低于 `1.3`，部分英文小写字母下端极其容易被隐形裁剪，正文需保持合理行高。
 - **边框与阴影溢出**：所有的边框宽度、`box-shadow` 都可能溢出原有容器。借助于 `box-sizing: border-box`，确保 padding 和 border 在规划宽度内。
+- **密度合同预防**：正文最小字号不得低于 `density_contract.min_body_font_px`；如果放不下，先减装饰，再收紧预算，再回退 planning，不得偷缩到不可读。
 
 - **禁止** `width: 100%; height: 100%` 然后依赖父容器
 - **禁止** `transform: scale()` 缩放 hack
@@ -133,6 +153,7 @@ body {
 - `decoration_dna.forbidden`：硬边界，违反即自动不达标
 - `decoration_dna.recommended_combos`：优先采用
 - `decoration_dna.signature_move`：跨页识别锚点，必须出现
+- `density_contract.decoration_budget`：同时约束装饰层数量。默认上限建议为：`generous <= 6`、`medium <= 4`、`low <= 2`、`minimal <= 1`
 
 ---
 
@@ -143,6 +164,7 @@ body {
 **你的架构底线与渲染特权：**
 - **严守骨架**：绝不允许在宏观上摧毁 Planning 划定的 `layout_hint` 结构体系和文档重力场。
 - **释放渲染力**：在确保结构坚如磐石的前提下，CSS 的实现特权完全下放给你。你可以大胆使用绝对定位、高级滤镜、复杂渐变、clip-path 去雕琢卡片，尽情通过 CSS 解放被原数据束缚的表现张力。
+- **密度服从优先**：`high / dashboard` 页首先要清晰、稳定、可扫读，再谈戏剧化表现。不得为了“酷”牺牲结构。
 
 **设计独立性自检（追问：我的执行是否精准且克制？）**：
 - 本页的底层承重墙（DOM结构）与 `page_goal` 和 `director_command` 的原意做到了一比一还原吗？

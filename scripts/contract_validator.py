@@ -33,6 +33,13 @@ PASS_WORDS = {"pass", "passed", "通过", "已通过", "ok"}
 FAIL_WORDS = {"fail", "failed", "不通过", "未通过", "reject", "rejected"}
 STAGE_ORDER = {"planning": 0, "html": 1, "review": 2}
 ANCHOR_LINE_PATTERN = re.compile(r"^\s*(?:[-*]\s*)?([A-Za-z_][A-Za-z0-9_-]*)\s*[：:]\s*(.+?)\s*$")
+VALID_DENSITY_BIASES = {"relaxed", "balanced", "ultra_dense"}
+VALID_DENSITY_LABELS = {"low", "mid_low", "medium", "high", "dashboard"}
+DENSITY_ORDER = {"low": 0, "mid_low": 1, "medium": 2, "high": 3, "dashboard": 4}
+VALID_RHYTHM_ACTIONS = {"铺垫", "推进", "爆发", "缓冲", "收束"}
+VALID_INFO_POSTURES = {"结论页", "解释页", "证据页", "仪表盘页", "呼吸页"}
+VALID_ANCHOR_TYPES = {"标题", "KPI", "图表", "表格", "图片", "引言"}
+NON_DASHBOARD_PAGE_TYPES = {"cover", "section", "end"}
 REQUIRED_INTERVIEW_DIMENSIONS = [
     ("scenario", ["场景", "使用场景", "应用场景", "scenario"]),
     ("audience", ["受众", "听众", "对象", "audience"]),
@@ -149,6 +156,76 @@ def contains_any(text: str, words: list[str]) -> bool:
     return any(word.lower() in lowered for word in words)
 
 
+def normalize_density_bias(raw: Any) -> str | None:
+    if not is_non_empty_string(raw):
+        return None
+    lowered = str(raw).strip().lower()
+    mapping = {
+        "relaxed": "relaxed",
+        "balanced": "balanced",
+        "ultra_dense": "ultra_dense",
+        "少而精": "relaxed",
+        "适中": "balanced",
+        "容量极大": "ultra_dense",
+        "极高密度": "ultra_dense",
+    }
+    return mapping.get(lowered) or mapping.get(str(raw).strip())
+
+
+def derive_density_bias_from_page_density(raw: Any) -> str | None:
+    return normalize_density_bias(raw)
+
+
+def normalize_density_label(raw: Any) -> str | None:
+    if not is_non_empty_string(raw):
+        return None
+    lowered = str(raw).strip().lower().replace("-", "_")
+    if lowered in VALID_DENSITY_LABELS:
+        return lowered
+    return None
+
+
+def density_rank(label: str | None) -> int | None:
+    if label is None:
+        return None
+    return DENSITY_ORDER.get(label)
+
+
+def extract_named_field(text: str, names: list[str]) -> str | None:
+    for name in names:
+        match = re.search(rf"^\s*(?:[-*]\s*)?{re.escape(name)}\s*[：:]\s*(.+?)\s*$", text, re.M)
+        if match:
+            value = match.group(1).strip()
+            if value:
+                return value
+    return None
+
+
+def parse_outline_pages(text: str) -> list[dict[str, Any]]:
+    page_headers = list(re.finditer(r"^###\s*第\s*(\d+)\s*页[:：]\s*(.+?)\s*$", text, re.M))
+    pages: list[dict[str, Any]] = []
+    for index, match in enumerate(page_headers):
+        page_num = int(match.group(1))
+        page_title = match.group(2).strip()
+        block_start = match.end()
+        block_end = page_headers[index + 1].start() if index + 1 < len(page_headers) else len(text)
+        block = text[block_start:block_end]
+        page = {
+            "page_number": page_num,
+            "page_title": page_title,
+            "page_goal": extract_named_field(block, ["页目标", "page_goal"]),
+            "page_type": extract_named_field(block, ["页面类型映射", "page_type"]),
+            "density_lower": normalize_density_label(extract_named_field(block, ["密度下限", "density_lower"])),
+            "density_target": normalize_density_label(extract_named_field(block, ["密度目标", "density_target"])),
+            "density_upper": normalize_density_label(extract_named_field(block, ["密度上限", "density_upper"])),
+            "rhythm_action": extract_named_field(block, ["节奏动作", "rhythm_action"]),
+            "info_posture": extract_named_field(block, ["信息姿态", "info_posture"]),
+            "anchor_type": extract_named_field(block, ["锚点类型", "anchor_type"]),
+        }
+        pages.append(page)
+    return pages
+
+
 def extract_anchor_fields(text: str) -> dict[str, str]:
     anchors: dict[str, str] = {}
     for line in text.splitlines():
@@ -193,9 +270,11 @@ def validate_interview(path: Path) -> tuple[ValidationResult, dict[str, Any]]:
     matched = validate_topics_coverage(text, result, "interview-qa")
     anchors = extract_anchor_fields(text)
     matched_anchors = validate_required_anchor_fields(anchors, REQUIRED_INTERVIEW_ANCHORS, result, "interview-qa")
+    density_bias = derive_density_bias_from_page_density(anchors.get("density_bias") or anchors.get("page_density"))
     summary["matched_dimensions"] = matched
     summary["matched_anchor_fields"] = matched_anchors
     summary["anchor_fields_present"] = sorted(anchors.keys())
+    summary["density_bias"] = density_bias
     summary["errors"] = len(result.errors)
     summary["warnings"] = len(result.warnings)
     return result, summary
@@ -206,6 +285,7 @@ def validate_requirements_interview(path: Path) -> tuple[ValidationResult, dict[
     matched = validate_topics_coverage(text, result, "requirements-interview")
     anchors = extract_anchor_fields(text)
     matched_anchors = validate_required_anchor_fields(anchors, REQUIRED_INTERVIEW_ANCHORS, result, "requirements-interview")
+    density_bias = derive_density_bias_from_page_density(anchors.get("density_bias") or anchors.get("page_density"))
 
     if not contains_any(text, ["branch", "分支", "research", "直接制作", "现有资料"]):
         result.warn("requirements-interview: branch decision is not explicit")
@@ -213,6 +293,7 @@ def validate_requirements_interview(path: Path) -> tuple[ValidationResult, dict[
     summary["matched_dimensions"] = matched
     summary["matched_anchor_fields"] = matched_anchors
     summary["anchor_fields_present"] = sorted(anchors.keys())
+    summary["density_bias"] = density_bias
     summary["errors"] = len(result.errors)
     summary["warnings"] = len(result.warnings)
     return result, summary
@@ -255,7 +336,97 @@ def validate_outline(path: Path) -> tuple[ValidationResult, dict[str, Any]]:
     if not contains_any(text, ["自审通过", "SELF_REVIEW_PASS", "outline-self-review", "自审"]):
         result.warn("outline: no explicit self-review marker detected")
 
+    density_bias = normalize_density_bias(
+        extract_named_field(text, ["密度倾向", "density_bias"]) or extract_named_field(text, ["page_density"])
+    )
+    if density_bias is None:
+        result.error("outline: missing valid `密度倾向` / `density_bias`")
+
+    density_curve = extract_named_field(text, ["密度曲线", "density_curve"])
+    if not is_non_empty_string(density_curve):
+        result.error("outline: missing `密度曲线` / `density_curve`")
+
+    pages = parse_outline_pages(text)
+    if not pages:
+        result.error("outline: failed to parse page blocks")
+
+    dashboard_pages = 0
+    high_pressure_streak = 0
+    for index, page in enumerate(pages):
+        page_label = f"outline page {page['page_number']}"
+        for field_name, field_value in (
+            ("密度下限", page["density_lower"]),
+            ("密度目标", page["density_target"]),
+            ("密度上限", page["density_upper"]),
+        ):
+            if field_value is None:
+                result.error(f"{page_label}: missing valid `{field_name}`")
+
+        lower_rank = density_rank(page["density_lower"])
+        target_rank = density_rank(page["density_target"])
+        upper_rank = density_rank(page["density_upper"])
+        if None not in (lower_rank, target_rank, upper_rank) and not (lower_rank <= target_rank <= upper_rank):
+            result.error(f"{page_label}: 密度窗口非法，必须满足 下限 <= 目标 <= 上限")
+
+        rhythm_action = page["rhythm_action"]
+        if not is_non_empty_string(rhythm_action):
+            result.error(f"{page_label}: missing `节奏动作`")
+        elif rhythm_action not in VALID_RHYTHM_ACTIONS:
+            result.error(f"{page_label}: invalid 节奏动作 `{rhythm_action}`")
+
+        info_posture = page["info_posture"]
+        if not is_non_empty_string(info_posture):
+            result.error(f"{page_label}: missing `信息姿态`")
+        elif info_posture not in VALID_INFO_POSTURES:
+            result.error(f"{page_label}: invalid 信息姿态 `{info_posture}`")
+
+        anchor_type = page["anchor_type"]
+        if not is_non_empty_string(anchor_type):
+            result.error(f"{page_label}: missing `锚点类型`")
+        elif anchor_type not in VALID_ANCHOR_TYPES:
+            result.error(f"{page_label}: invalid 锚点类型 `{anchor_type}`")
+
+        page_type = (page["page_type"] or "").strip().lower()
+        if page_type in NON_DASHBOARD_PAGE_TYPES:
+            if "dashboard" in {page["density_lower"], page["density_target"], page["density_upper"]}:
+                result.error(f"{page_label}: page_type={page_type} 不允许使用 dashboard 密度")
+
+        if density_bias == "relaxed" and page_type == "content":
+            if "dashboard" in {page["density_lower"], page["density_target"], page["density_upper"]}:
+                result.error(f"{page_label}: relaxed 模式 content 页禁止 dashboard")
+        elif density_bias == "balanced" and page_type == "content":
+            ranks = [rank for rank in (lower_rank, target_rank, upper_rank) if rank is not None]
+            if ranks and min(ranks) < DENSITY_ORDER["mid_low"]:
+                result.error(f"{page_label}: balanced 模式 content 页密度不得低于 mid_low")
+        elif density_bias == "ultra_dense" and page_type == "content":
+            ranks = [rank for rank in (lower_rank, target_rank, upper_rank) if rank is not None]
+            if ranks and min(ranks) < DENSITY_ORDER["medium"]:
+                result.error(f"{page_label}: ultra_dense 模式 content 页密度不得低于 medium")
+
+        if page["density_target"] == "dashboard":
+            dashboard_pages += 1
+            if info_posture != "仪表盘页":
+                result.error(f"{page_label}: dashboard 页必须使用 `信息姿态: 仪表盘页`")
+            prev_target = pages[index - 1]["density_target"] if index > 0 else None
+            next_target = pages[index + 1]["density_target"] if index + 1 < len(pages) else None
+            if prev_target == "dashboard" or next_target == "dashboard":
+                result.error(f"{page_label}: dashboard 前后必须至少有 1 页非 dashboard 过渡")
+
+        if info_posture == "仪表盘页" and page["density_target"] != "dashboard":
+            result.error(f"{page_label}: `信息姿态: 仪表盘页` 必须对应 `密度目标: dashboard`")
+
+        if page["density_target"] in {"high", "dashboard"}:
+            high_pressure_streak += 1
+        else:
+            high_pressure_streak = 0
+        if high_pressure_streak >= 3:
+            result.error(f"{page_label}: 禁止连续 3 页 `high/dashboard`")
+
     summary["page_markers"] = len(page_markers)
+    summary["density_bias"] = density_bias
+    summary["density_curve"] = density_curve
+    summary["parsed_pages"] = len(pages)
+    summary["dashboard_pages"] = dashboard_pages
     summary["errors"] = len(result.errors)
     summary["warnings"] = len(result.warnings)
     return result, summary

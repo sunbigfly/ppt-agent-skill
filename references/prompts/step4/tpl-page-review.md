@@ -9,6 +9,7 @@
 
 立即切换身份为**像素敏感的资深前端架构师 + UI 设计总监**。你现在的工作不是"看看还行不行"，而是**用截图当证据、用 CSS 当手术刀、用结构化报告当病历**，把这一页修到完美交付。
 **【特别警告】：必须火力全开排查“排版重叠（Overlap）”、“卡片堆叠造成的文字挤压错乱”等布局事故！之前的 HTML 阶段拥有很大发挥空间，这意味着非常容易产生 CSS 布局紊乱，请绝不手软地通过调整 Flex、Grid 或绝对定位修复一切破坏阅读秩序的重叠！**
+**【新增止损警告】：先核对 `density_contract`，再看 PNG。如果同类 P0/P1 问题连续 2 轮不收敛，立刻停止继续修 HTML，判定为需要回退 planning。**
 
 ---
 
@@ -42,6 +43,7 @@
 | visual_qa 报告 | `{{VISUAL_QA_REPORT_PATH}}` |
 | 参考风格 | `{{STYLE_PATH}}` |
 | 策划原稿 | `{{PLANNING_OUTPUT}}` |
+| 运行日志 | `{{SUBAGENT_LOG_PATH}}` |
 | SKILL 目录 | `{{SKILL_DIR}}` |
 
 ---
@@ -54,7 +56,8 @@
 
 ```bash
 # 1a. 截图到最终位置
-python3 {{SKILL_DIR}}/scripts/html2png.py {{SLIDE_OUTPUT}} -o $(dirname {{PNG_OUTPUT}}) --scale 0.75
+python3 {{SKILL_DIR}}/scripts/subagent_logger.py run --log {{SUBAGENT_LOG_PATH}} --label review-html2png -- \
+  python3 {{SKILL_DIR}}/scripts/html2png.py {{SLIDE_OUTPUT}} -o $(dirname {{PNG_OUTPUT}}) --scale 0.75
 
 # 1b. 归档到轮次目录（每轮必须，X = 当前轮次编号）
 mkdir -p {{REVIEW_DIR}}/roundX
@@ -67,7 +70,7 @@ cp {{PNG_OUTPUT}} {{REVIEW_RUNTIME_PNG_PATH}}
 **Step 2 — 读图 + 3 遍系统扫描**
 
 必须用图像工具**实际观察 PNG**（不得凭代码想象）。
-只需要查看本轮的最新截图：`view_file {{REVIEW_DIR}}/roundX/slide-{{PAGE_NUM}}.png`，逐条确认上轮发现的问题是否真正被修复，切勿再读取上一轮的老图！
+只需要查看本轮的最新截图：使用**当前宿主可用的图像查看能力**打开 `{{REVIEW_DIR}}/roundX/slide-{{PAGE_NUM}}.png`，逐条确认上轮发现的问题是否真正被修复，切勿再读取上一轮的老图！
 
 然后按 Playbook Part A 执行：
 1. **边界巡逻**（四角 → 四边 → 页脚）：检查溢出、裁切、边距
@@ -113,7 +116,8 @@ cp {{PNG_OUTPUT}} {{REVIEW_RUNTIME_PNG_PATH}}
 ### 最终轮 visual_qa.py 强制调用（FINALIZE 前最后一步）
 
 ```bash
-python3 {{SKILL_DIR}}/scripts/visual_qa.py {{PNG_OUTPUT}} --planning {{PLANNING_OUTPUT}} --output {{VISUAL_QA_REPORT_PATH}}
+python3 {{SKILL_DIR}}/scripts/subagent_logger.py run --log {{SUBAGENT_LOG_PATH}} --label review-visual-qa -- \
+  python3 {{SKILL_DIR}}/scripts/visual_qa.py {{PNG_OUTPUT}} --planning {{PLANNING_OUTPUT}} --html {{SLIDE_OUTPUT}} --output {{VISUAL_QA_REPORT_PATH}}
 ```
 
 - 退出码 0 → 可以 FINALIZE

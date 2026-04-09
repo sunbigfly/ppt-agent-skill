@@ -15,13 +15,21 @@
     <img src="https://img.shields.io/badge/版式类型-10_种-00d4ff?style=flat-square" />
     <img src="https://img.shields.io/badge/图表模板-13_种-8b5cf6?style=flat-square" />
     <img src="https://img.shields.io/badge/组件库-8_类-22c55e?style=flat-square" />
-    <img src="https://img.shields.io/badge/脚本工具-14_个-f59e0b?style=flat-square" />
+    <img src="https://img.shields.io/badge/脚本工具-15_个-f59e0b?style=flat-square" />
   </p>
 </div>
 
 ---
 
 **PPT Agent** 以严格的状态机驱动多 Agent 协作，将一句话需求输出为专业级 PPTX 文件，从根源解决传统大模型生成的幻觉、重叠与布局混乱问题。
+
+## 最近更新
+
+`2026-04-09 · v4.1`
+
+- 补齐 Step 3 `density_bias` 与 Step 4 `density_label / density_contract` 合同，页面密度预算开始成为明确的可校验约束。
+- `visual_qa.py` 新增 `planning + html` 双层断言，除了看图，也会核对结构与装饰预算。
+- 新增 `subagent_logger.py`，把 PageAgent / PagePatchAgent 的阶段命令与运行日志补齐，断点返工更容易审计与回放。
 
 ## 安装
 

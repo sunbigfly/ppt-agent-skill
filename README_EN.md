@@ -15,13 +15,21 @@
     <img src="https://img.shields.io/badge/Layouts-10_Types-00d4ff?style=flat-square" />
     <img src="https://img.shields.io/badge/Charts-13_Templates-8b5cf6?style=flat-square" />
     <img src="https://img.shields.io/badge/Blocks-8_Components-22c55e?style=flat-square" />
-    <img src="https://img.shields.io/badge/Scripts-14_Tools-f59e0b?style=flat-square" />
+    <img src="https://img.shields.io/badge/Scripts-15_Tools-f59e0b?style=flat-square" />
   </p>
 </div>
 
 ---
 
 **PPT Agent** is a strict state-machine-driven multi-agent framework that converts a single prompt into a professional PPTX file—eliminating the hallucinations, visual overlaps, and layout instability common in direct LLM generation.
+
+## Latest Update
+
+`2026-04-09 · v4.1`
+
+- Added explicit density contracts across Step 3 `density_bias` and Step 4 `density_label / density_contract`, turning slide density into a validated budget instead of a loose prompt preference.
+- Upgraded `visual_qa.py` with dual checks against both `planning` and `html`, so the gate now validates structure and decoration budget in addition to screenshot review.
+- Added `subagent_logger.py` to persist PageAgent / PagePatchAgent stage commands and runtime logs, making replay and audit of repair loops much easier.
 
 ## Highlights
 

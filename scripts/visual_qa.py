@@ -253,12 +253,11 @@ def check_planning_cards_coverage(img: Image.Image, planning_path: Path) -> dict
         return {"id": "CARD-01", "status": "WARN", "msg": f"planning 文件不存在: {planning_path}"}
 
     try:
-        with open(planning_path) as f:
-            planning = json.load(f)
+        planning = json.loads(planning_path.read_text(encoding="utf-8"))
         page = planning.get("page", planning)
         cards = page.get("cards", [])
         card_count = len(cards)
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, UnicodeDecodeError):
         return {"id": "CARD-01", "status": "WARN", "msg": "planning JSON 解析失败"}
 
     if card_count == 0:
